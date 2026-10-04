@@ -11,7 +11,7 @@ function setup(handler, stores = {}, logs = []) {
     setTimeout: (fn, ms) => { timers.push({fn,ms}); return timers.length; }, clearTimeout(){},
     addEventListener: (name, fn) => listeners[name] = fn,
     fetch: async (url, opts) => {
-      const req = {path:url.split('/api/public/')[1], body:JSON.parse(opts.body), opts}; calls.push(req);
+      const req = {url, path:url.split('/api/public/')[1], body:JSON.parse(opts.body), opts}; calls.push(req);
       const r = await handler(req, calls);
       return {ok:(r.status || 200)<400, status:r.status || 200, headers:{get:()=>r.retry || null}, json:async()=>r.body};
     }
@@ -23,6 +23,12 @@ const success = req => ({body:req.path === 'student/identify'
   ? {ok:true,student_id:12,submission_token:'test-token'} : {ok:true,stored:true}});
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const pass = {name:'سارة محمد',school:'مدرسة الاختبار'};
+test('public API base is the single-hyphen production hostname', async () => {
+  assert.ok(source.includes("const API = 'https://schools-bridge-admin.onrender.com/api/public/';"));
+  assert.ok(!source.includes('schools--bridge-admin'));
+  const s = setup(success); s.client.setIdentity(pass); await settle();
+  assert.equal(s.calls[0].url, 'https://schools-bridge-admin.onrender.com/api/public/student/identify');
+});
 test('identity and result use only public contract, no cookies; result rendered twice sends once', async () => {
   const s = setup(success); s.client.setIdentity(pass);
   const a = s.client.start({id:'book-picnic',title:'Story'},'reading');

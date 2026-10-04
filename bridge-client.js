@@ -1,7 +1,7 @@
 /* Public, write-only student API. No teacher credentials or cookies. */
 (() => {
   'use strict';
-  const API = 'https://schools--bridge-admin.onrender.com/api/public/';
+  const API = 'https://schools-bridge-admin.onrender.com/api/public/';
   const uid = () => globalThis.crypto?.randomUUID?.() ||
     'ev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
   const read = (store, key, fallback) => {
