@@ -1,6 +1,6 @@
 # Student public API integration
 
-Backend: `https://schools--bridge-admin.onrender.com`. Implements the user-supplied contract; backend source is not accessible to this session.
+Backend: `https://schools-bridge-admin.onrender.com`. Implements the user-supplied contract; backend source is not accessible to this session.
 
 ## Changes
 
