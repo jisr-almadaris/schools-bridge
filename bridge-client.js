@@ -59,7 +59,10 @@
     persist();
   }
   async function flush() {
-    if (busy || navigator.onLine === false) return;
+    // The browser's offline hint is unreliable (in-app browsers, proxies, sandboxes).
+    // It must never suppress an attempt: fetch fails fast when truly offline and the
+    // queued item is retried, so a wrong hint can no longer silently block submissions.
+    if (busy) return;
     busy = true;
     try {
       while (queue.length) {
@@ -76,10 +79,15 @@
           }
           queue.shift(); persist();
         } catch (e) {
+          // Safe diagnostics only: endpoint, HTTP status, and error code.
+          // Never log names, schools, visitor IDs, tokens, or payload bodies.
+          const status = Number.isFinite(e?.status) ? e.status : null;
+          const reason = e?.name === 'AbortError' ? 'timeout' : (e?.message || 'network_error');
           if (e.status === 400) {
-            console.warn('Bridge submission rejected:', e.message);
+            console.warn('Bridge submission rejected:', item.path, status, reason);
             queue.shift(); persist(); continue;
           }
+          console.warn('Bridge submission deferred:', item.path, status, reason);
           defer((e.status === 429 ? e.retry : 60) * 1000);
           break;
         }
@@ -90,10 +98,14 @@
     if (!owner) return; // No attribution of anonymous/historical work to a later identity.
     queue.push({ path, body, owner }); persist(); void flush();
   }
-  function setIdentity(pass) {
+  function setIdentity(pass, options) {
     if (!pass) return;
-    if (current?.name === pass.name && current?.school === pass.school) { void flush(); return; }
-    current = { key: uid(), name: pass.name, school: pass.school };
+    const force = options?.force === true;
+    const same = current?.name === pass.name && current?.school === pass.school;
+    if (!same) current = { key: uid(), name: pass.name, school: pass.school };
+    // An explicit form submission must request identification even when the name/school
+    // are unchanged; an identity that lost its token must be re-identified on resume.
+    if (same && current.token && !force) { void flush(); return; }
     enqueue('student/identify', {}, current);
   }
   function start(activity, type) {

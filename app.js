@@ -698,7 +698,7 @@ function initPassForm() {
     if (!ok) { toast('أكملي الحقول أولًا يا صغيرتي'); return; }
 
     SB.savePass({ name, school });
-    window.BridgeClient?.setIdentity(SB.pass);
+    window.BridgeClient?.setIdentity(SB.pass, { force: true });
     applyPassUI({ celebrate: true });
   });
 
