@@ -698,6 +698,7 @@ function initPassForm() {
     if (!ok) { toast('أكملي الحقول أولًا يا صغيرتي'); return; }
 
     SB.savePass({ name, school });
+    window.BridgeClient?.setIdentity(SB.pass);
     applyPassUI({ celebrate: true });
   });
 
@@ -937,6 +938,7 @@ $('#printCert')?.addEventListener('click', () => {
 const CERT_CORNER = `<svg viewBox="0 0 90 90" fill="none" aria-hidden="true"><path d="M6 84C6 40 40 6 84 6" stroke="currentColor" stroke-width="2.2"/><path d="M18 84C18 52 52 18 84 18" stroke="currentColor" stroke-width="1.1" opacity=".55"/><path d="M30 84C30 60 60 30 84 30" stroke="currentColor" stroke-width=".8" opacity=".35"/><circle cx="84" cy="6" r="2.6" fill="currentColor"/><circle cx="6" cy="84" r="2.6" fill="currentColor"/></svg>`;
 
 SB.load();
+window.BridgeClient?.setIdentity(SB.pass);
 SB.renderAll = function () {
   RENDER.games(); RENDER.vocabulary(); RENDER.books(); RENDER.worksheets();
   RENDER.stations(); RENDER.levelsProgress(); refreshProgress(); renderCert(); renderAchJournal();
@@ -1118,8 +1120,11 @@ function brSetMode(m) {
   stage.classList.add('br-stage-swap-in');
 }
 
+let bridgeReadingAttempt = null, bridgeAssessmentAttempt = null;
+
 function openBook(id) {
   const b = SB.data.books.find(x => x.id === id); if (!b) return;
+  bridgeReadingAttempt = window.BridgeClient?.start(b, 'reading');
   const el = ensureReader();
   _rBook = b; _rPage = 0; _rQ = 0; _rRight = 0;
   $('#brTitle').textContent = b.title;
@@ -1219,6 +1224,7 @@ function readerNext() {
 function readerPrev() { if (_rPage > 0) _readerStep(_rPage - 1); }
 
 function renderQuiz() {
+  if (bridgeReadingAttempt?.submitted) bridgeReadingAttempt = window.BridgeClient?.start(_rBook, 'reading');
   brSetMode('quiz');
   _rRight = 0; _rQ = 0;
   renderQuestion();
@@ -1267,6 +1273,7 @@ function renderQuestion() {
 }
 
 function renderResult() {
+  window.BridgeClient?.result(bridgeReadingAttempt, _rRight, _rBook.quiz.length);
   brSetMode('result');
   const b = _rBook, n = b.quiz.length;
   const pct = Math.round((_rRight / n) * 100);
@@ -1419,6 +1426,7 @@ function svZoom(d) {
 
 function openSheet(id) {
   const w = SB.data.worksheets.find(x => x.id === id); if (!w) return;
+  window.BridgeClient?.start(w, 'worksheet');
   const el = ensureSheetViewer();
   _svSheet = w; _svZoom = 0;
   $('#svTitle').textContent = `ورقة ${w.n} · ${w.title}`;
@@ -1455,6 +1463,7 @@ function closeSheet() {
 let _svPrintFrame = null;
 function printSheet(id) {
   const w = SB.data.worksheets.find(x => x.id === id); if (!w) return;
+  window.BridgeClient?.start(w, 'worksheet');
   if (_svPrintFrame) _svPrintFrame.remove();
   const src = new URL(w.full, location.href).href;
   const f = document.createElement('iframe');
@@ -1519,6 +1528,7 @@ function ensureStation() {
 
 function openStation(id) {
   const st = SB.stations.find(x => x.id === id); if (!st) return;
+  bridgeAssessmentAttempt = window.BridgeClient?.start(st, 'assessment');
   const el = ensureStation();
   _sqSt = st; _sqQ = 0; _sqRight = 0;
   $('#sqTitle').textContent = `${st.name} · `;
@@ -1596,6 +1606,7 @@ function sqRenderQ() {
 }
 
 function sqRenderResult() {
+  window.BridgeClient?.result(bridgeAssessmentAttempt, _sqRight, _sqSt.qs.length);
   const st = _sqSt, n = st.qs.length;
   const pct = Math.round((_sqRight / n) * 100);
   const passed = pct >= 80;
@@ -1652,7 +1663,7 @@ function sqRenderResult() {
       toast('شهادتك جاهزة في لوحة الإنجاز — اطبعيها من هناك');
     }, 800);
   });
-  $('#sqRetry').addEventListener('click', () => { _sqQ = 0; _sqRight = 0; sqRenderQ(); });
+  $('#sqRetry').addEventListener('click', () => { bridgeAssessmentAttempt = window.BridgeClient?.start(_sqSt, 'assessment'); _sqQ = 0; _sqRight = 0; sqRenderQ(); });
   $('#sqExit').addEventListener('click', () => closeStation());
 }
 
@@ -1838,3 +1849,11 @@ function renderAchJournal() {
     });
   }
 }
+
+// Native external links keep their existing navigation and appearance.
+document.addEventListener('click', e => {
+  const link = e.target.closest('.dest-link');
+  if (!link) return;
+  const activity = [...SB.data.games, ...SB.data.vocabulary].find(a => a.id === link.dataset.card);
+  if (activity) window.BridgeClient?.start(activity, SB.data.vocabulary.includes(activity) ? 'vocabulary' : 'game');
+});
