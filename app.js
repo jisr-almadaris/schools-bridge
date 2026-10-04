@@ -254,9 +254,11 @@ const SB = {
     try { this.cert = JSON.parse(localStorage.getItem('sb_cert') || '{"awards":[],"current":null}'); } catch {}
     if (!this.cert || !Array.isArray(this.cert.awards)) this.cert = { awards: [], current: null };
   },
-  savePass(p)   { this.pass = p; sessionStorage.setItem('sb_pass', JSON.stringify(p)); },
-  saveProgress(){ localStorage.setItem('sb_progress', JSON.stringify(this.progress)); },
-  saveCert()    { localStorage.setItem('sb_cert', JSON.stringify(this.cert)); },
+  // Storage can be disabled (private browsing, quota, sandbox policy). Keep the
+  // in-memory student flow working even when persistence is unavailable.
+  savePass(p)   { this.pass = p; try { sessionStorage.setItem('sb_pass', JSON.stringify(p)); } catch {} },
+  saveProgress(){ try { localStorage.setItem('sb_progress', JSON.stringify(this.progress)); } catch {} },
+  saveCert()    { try { localStorage.setItem('sb_cert', JSON.stringify(this.cert)); } catch {} },
 
   /* only issued at 80%+ — never below */
   issueCertificate(award) {
