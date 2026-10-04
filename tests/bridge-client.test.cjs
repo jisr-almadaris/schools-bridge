@@ -4,9 +4,9 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const source = fs.readFileSync('bridge-client.js', 'utf8');
 const storage = () => { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k,v) => m.set(k,v) }; };
-function setup(handler, stores = {}) {
+function setup(handler, stores = {}, logs = []) {
   const calls = [], timers = [], listeners = {};
-  const ctx = { console: {warn(){}}, AbortController, Date, Math, navigator: {onLine:true},
+  const ctx = { console: {warn(...args){ logs.push(args.join(' ')); }}, AbortController, Date, Math, navigator: {onLine:true},
     localStorage: stores.localStorage || storage(), sessionStorage: stores.sessionStorage || storage(),
     setTimeout: (fn, ms) => { timers.push({fn,ms}); return timers.length; }, clearTimeout(){},
     addEventListener: (name, fn) => listeners[name] = fn,
@@ -17,7 +17,7 @@ function setup(handler, stores = {}) {
     }
   };
   ctx.window = ctx; vm.runInNewContext(source, ctx);
-  return {ctx, client:ctx.BridgeClient, calls, timers, listeners};
+  return {ctx, client:ctx.BridgeClient, calls, timers, listeners, logs};
 }
 const success = req => ({body:req.path === 'student/identify'
   ? {ok:true,student_id:12,submission_token:'test-token'} : {ok:true,stored:true}});
@@ -75,8 +75,9 @@ test('assessment has generic and station records with distinct event IDs; retrie
   assert.equal(r[1].body.station_key,'verification');
 });
 test('queue survives reload and stable visitor persists', async () => {
-  const s=setup(success); s.ctx.navigator.onLine=false; s.client.setIdentity(pass);
-  s.client.result(s.client.start({id:'book-sea'},'reading'),5,5);
+  const s=setup(()=>{ throw Error('offline'); }); s.client.setIdentity(pass);
+  s.client.result(s.client.start({id:'book-sea'},'reading'),5,5); await settle();
+  assert.equal(JSON.parse(s.ctx.sessionStorage.getItem('bridge_queue')).length,3);
   const t=setup(success,s.ctx); await t.client.flush();
   assert.equal(t.calls.length,3); assert.equal(t.calls[0].body.visitor_id,JSON.parse(s.ctx.localStorage.getItem('bridge_visitor_id')));
 });
@@ -102,4 +103,28 @@ test('storage access failure does not break the activity flow', async () => {
   const s=setup(success,{localStorage:denied,sessionStorage:denied});
   s.client.setIdentity(pass); s.client.result(s.client.start({id:'book-sea'},'reading'),5,5); await settle();
   assert.equal(s.calls.length,3);
+});
+test('explicit submission re-identifies unchanged identity and repairs a missing token', async () => {
+  const s=setup(success);
+  s.client.setIdentity(pass); await settle();
+  assert.equal(s.calls.filter(c=>c.path==='student/identify').length,1);
+  s.client.setIdentity(pass,{force:true}); await settle();
+  assert.equal(s.calls.filter(c=>c.path==='student/identify').length,2);
+  const stored=JSON.parse(s.ctx.sessionStorage.getItem('bridge_identity')); delete stored.token;
+  s.ctx.sessionStorage.setItem('bridge_identity',JSON.stringify(stored));
+  const t=setup(success,s.ctx); t.client.setIdentity(pass); await settle();
+  assert.equal(t.calls.filter(c=>c.path==='student/identify').length,1);
+});
+test('browser offline hint does not prevent an attempted request', async () => {
+  const s=setup(success); s.ctx.navigator.onLine=false;
+  s.client.setIdentity(pass); s.client.result(s.client.start({id:'book-sea'},'reading'),5,5); await settle();
+  assert.deepEqual(s.calls.map(c=>c.path),['student/identify','activity/opened','activity/result']);
+});
+test('failed requests log safe diagnostics without personal data', async () => {
+  const s=setup(()=>({status:503,body:{ok:false,error:'public_api_disabled'}}));
+  s.client.setIdentity(pass); await settle();
+  assert.equal(s.logs.length,1);
+  const text=s.logs.join('\n');
+  assert.match(text,/student\/identify/); assert.match(text,/503/);
+  assert.ok(!text.includes(pass.name) && !text.includes(pass.school));
 });

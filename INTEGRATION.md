@@ -15,6 +15,8 @@ Backend: `https://schools--bridge-admin.onrender.com`. Implements the user-suppl
 
 A stable browser visitor ID is stored in localStorage. Identity/token and queued events are tab-scoped in sessionStorage, avoiding cross-tab token replacement. Attempts capture their owner at launch. Queue items retain that owner and result event ID through retries and reloads. Token recovery verifies that the returned student ID has not changed. Anonymous attempts and pre-existing local progress are not uploaded retroactively.
 
+Submitting the gateway form always requests identification, even when the name/school are unchanged, and an identity whose token is missing is re-identified on resume. The browser's `navigator.onLine` hint is not used to suppress attempts; a wrong hint can no longer silently block submissions. Failed requests emit console diagnostics limited to endpoint, HTTP status, and error code (no names, schools, visitor IDs, tokens, or payloads).
+
 Session queue persists reloads and offline reconnects **within the tab session**, not permanent tab closure. Storage-denied environments fall back to memory. Result duplicate responses count as success; opened has no server idempotency key, so an ambiguous network failure can cause an opened retry to count twice. Retries are serialized; 429 delays are honored, server/network failures retry after 60 seconds, invalid 400 payloads are logged and removed. Calls time out after 20 seconds without blocking local activity.
 
 The supplied backend contract uses the same visitor ID to resume the same server student, even when name/school are edited. This client cannot turn a shared-browser name edit into a separate server student without a backend-supported identity-switch contract. It does not invent one.
