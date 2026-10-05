@@ -116,8 +116,9 @@ test('explicit submission re-identifies unchanged identity and repairs a missing
   assert.equal(s.calls.filter(c=>c.path==='student/identify').length,1);
   s.client.setIdentity(pass,{force:true}); await settle();
   assert.equal(s.calls.filter(c=>c.path==='student/identify').length,2);
-  const stored=JSON.parse(s.ctx.sessionStorage.getItem('bridge_identity')); delete stored.token;
-  s.ctx.sessionStorage.setItem('bridge_identity',JSON.stringify(stored));
+  // The token now lives on the durable roster entry. Losing it there must be repaired.
+  const roster=JSON.parse(s.ctx.localStorage.getItem('bridge_roster')); delete roster[0].token;
+  s.ctx.localStorage.setItem('bridge_roster',JSON.stringify(roster));
   const t=setup(success,s.ctx); t.client.setIdentity(pass); await settle();
   assert.equal(t.calls.filter(c=>c.path==='student/identify').length,1);
 });
@@ -133,4 +134,135 @@ test('failed requests log safe diagnostics without personal data', async () => {
   const text=s.logs.join('\n');
   assert.match(text,/student\/identify/); assert.match(text,/503/);
   assert.ok(!text.includes(pass.name) && !text.includes(pass.school));
+});
+
+/* ---------------- shared-device multi-student records ---------------- */
+const perVisitor = req => req.path === 'student/identify'
+  ? {body:{ok:true, student_id:'id-'+req.body.visitor_id, submission_token:'tok-'+req.body.visitor_id}}
+  : success(req);
+const sA = {name:'طالبة أولى', school:'مدرسة النور'};
+const sB = {name:'طالبة ثانية', school:'مدرسة النور'};
+
+test('every student is an independent persistent server record', async () => {
+  const s = setup(perVisitor);
+  s.client.setIdentity(sA); await settle();
+  s.client.setIdentity(sB); await settle();
+  const ids = s.calls.filter(c=>c.path==='student/identify');
+  assert.equal(ids.length,2);
+  assert.notEqual(ids[0].body.visitor_id, ids[1].body.visitor_id);
+  const roster = JSON.parse(s.ctx.localStorage.getItem('bridge_roster'));
+  assert.equal(roster.length,2);
+  assert.deepEqual(roster.map(e=>e.name), [sA.name, sB.name]);
+  assert.equal(new Set(roster.map(e=>e.visitor_id)).size,2);
+});
+test('switching back resumes the same student and never rewrites the other record', async () => {
+  const s = setup(perVisitor);
+  s.client.setIdentity(sA); await settle();
+  s.client.setIdentity(sB); await settle();
+  s.client.setIdentity(sA); await settle();
+  // Coming back to A reuses her stored token — no re-identification needed.
+  s.client.result(s.client.start({id:'book-sea'},'reading'),5,5); await settle();
+  const ids = s.calls.filter(c=>c.path==='student/identify');
+  assert.equal(ids.length,2);
+  assert.notEqual(ids[0].body.visitor_id, ids[1].body.visitor_id);    // independent records
+  assert.equal(s.calls.find(c=>c.path==='activity/result').opts.headers.Authorization,
+    'Bearer tok-'+ids[0].body.visitor_id);                            // A's own record
+  const roster = JSON.parse(s.ctx.localStorage.getItem('bridge_roster'));
+  assert.equal(roster.length,2);                                      // append-only
+  assert.equal(roster[0].student_id,'id-'+roster[0].visitor_id);
+  assert.equal(roster[1].student_id,'id-'+roster[1].visitor_id);
+});
+test('an attempt is attributed to the student who started it, not the one active now', async () => {
+  const s = setup(perVisitor);
+  s.client.setIdentity(sA); await settle();
+  const a = s.client.start({id:'book-sea'},'reading'); await settle();
+  s.client.setIdentity(sB); await settle();
+  s.client.result(a,5,5); await settle();
+  const r = s.calls.find(c=>c.path==='activity/result');
+  assert.equal(r.opts.headers.Authorization,'Bearer tok-'+s.calls[0].body.visitor_id);
+  const opened = s.calls.find(c=>c.path==='activity/opened');
+  assert.equal(opened.opts.headers.Authorization,'Bearer tok-'+s.calls[0].body.visitor_id);
+});
+test('first student on a device adopts the pre-existing visitor id', async () => {
+  const store = storage(); store.setItem('bridge_visitor_id', JSON.stringify('v-legacy-device'));
+  const s = setup(success,{localStorage:store});
+  s.client.setIdentity(pass); await settle();
+  assert.equal(s.calls[0].body.visitor_id,'v-legacy-device');
+  s.client.setIdentity(sB); await settle();
+  assert.notEqual(s.calls[1].body.visitor_id,'v-legacy-device');
+});
+test('a student registered in another tab is not dropped', async () => {
+  const store = storage();
+  const s = setup(success,{localStorage:store});
+  s.client.setIdentity(sA); await settle();
+  const t = setup(success,{localStorage:store});       // a second tab
+  t.client.setIdentity(sB); await settle();
+  const u = setup(success,{localStorage:store});
+  u.client.setIdentity(sA); await settle();
+  const roster = JSON.parse(store.getItem('bridge_roster'));
+  assert.equal(roster.length,2);
+  assert.equal(new Set(roster.map(e=>e.visitor_id)).size,2);
+});
+test('registered students survive a reload with their own server identity', async () => {
+  const s = setup(perVisitor);
+  s.client.setIdentity(sA); await settle();
+  s.client.setIdentity(sB); await settle();
+  const t = setup(success, s.ctx);                     // new page, same device storage
+  t.client.setIdentity(sB);
+  t.client.result(t.client.start({id:'book-sea'},'reading'),5,5);
+  await settle();
+  assert.equal(t.calls.filter(c=>c.path==='student/identify').length,0); // roster token reused
+  assert.equal(t.calls.filter(c=>c.path==='activity/result').length,1);
+  assert.equal(t.calls.filter(c=>c.path==='activity/opened').length,1);
+});
+
+/* ---------------- certificates and achievements ---------------- */
+test('a certificate is its own event and never overwrites the score record', async () => {
+  const s = setup(success); s.client.setIdentity(pass); await settle();
+  s.client.result(s.client.start({id:'st-checkpoint',title:'Station'},'assessment'),4,5);
+  s.client.certificate({key:'st-checkpoint', title:'Station', score:80});
+  await settle();
+  const results = s.calls.filter(c=>c.path==='activity/result');
+  const score = results.find(c=>c.body.activity_key==='st-checkpoint');
+  const cert  = results.find(c=>c.body.activity_type==='certificate');
+  assert.equal(score.body.score,4); assert.equal(score.body.max_score,5);
+  assert.equal(score.body.percentage,80);
+  assert.equal(cert.body.activity_key,'st-checkpoint-cert');
+  assert.notEqual(cert.body.event_id, score.body.event_id);
+  assert.equal(cert.body.score,80); assert.equal(cert.body.max_score,100);
+  assert.equal(cert.opts.headers.Authorization,'Bearer test-token');
+});
+test('a repeated certificate result reuses its event id so the server stores it once', async () => {
+  const s = setup(success); s.client.setIdentity(pass); await settle();
+  s.client.certificate({key:'book-picnic', score:100});
+  s.client.certificate({key:'book-picnic', score:100});
+  await settle();
+  assert.deepEqual(s.calls.filter(c=>c.path==='activity/result').map(c=>c.body.event_id),
+    ['cert-book-picnic-100','cert-book-picnic-100']);
+});
+test('an improved certificate score is a separate record', async () => {
+  const s = setup(success); s.client.setIdentity(pass); await settle();
+  s.client.certificate({key:'book-picnic', score:80});
+  s.client.certificate({key:'book-picnic', score:100});
+  await settle();
+  assert.deepEqual(s.calls.filter(c=>c.path==='activity/result').map(c=>c.body.event_id),
+    ['cert-book-picnic-80','cert-book-picnic-100']);
+});
+test('an earned badge carries a stable key so the server stores it once', async () => {
+  const s = setup(success); s.client.setIdentity(pass); await settle();
+  s.client.achievement({id:'reader', name:'قارئة واعدة'});
+  s.client.achievement({id:'reader', name:'قارئة واعدة'});
+  await settle();
+  const evs = s.calls.filter(c=>c.body.activity_type==='achievement');
+  assert.equal(evs.length,2);
+  assert.equal(evs[0].body.activity_key,'badge-reader');
+  assert.equal(evs[0].body.event_id, evs[1].body.event_id);
+  assert.equal(evs[0].opts.headers.Authorization,'Bearer test-token');
+});
+test('certificates and badges are never attributed anonymously', async () => {
+  const s = setup(success);
+  s.client.certificate({key:'st-checkpoint', score:90});
+  s.client.achievement({id:'reader'});
+  await settle();
+  assert.equal(s.calls.length,0);
 });

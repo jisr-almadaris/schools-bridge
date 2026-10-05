@@ -16,6 +16,17 @@
 const $  = (s, c = document) => c.querySelector(s);
 const $$ = (s, c = document) => [...c.querySelectorAll(s)];
 
+/* ---------- shared-device student storage keys ----------
+   Stars / completed activities / scores / certificates are namespaced per
+   student so a shared device keeps every child's history separate. */
+const SB_STUDENTS_KEY = 'sb_students';
+const SB_PROGRESS_KEY = 'sb_progress::';
+const SB_CERT_KEY     = 'sb_cert::';
+const sbStudentKey = (name, school) => JSON.stringify([
+  String(name || '').trim().replace(/\s+/g, ' ').toLowerCase(),
+  String(school || '').trim().replace(/\s+/g, ' ').toLowerCase(),
+]);
+
 const SB = {
   data: {
     games: [
@@ -246,29 +257,97 @@ const SB = {
   pass: null,                       // { name, school }
   progress: { stars:0, done:[] },   // completed activity ids
   cert: { awards: [], current: null }, // earned certificates [{key,title,en,score}]
+  students: [],                     // shared-device roster [{key,name,school}]
+  currentKey: null,                 // key of the student this tab is working as
 
-  /* ---------- persistence ---------- */
+  /* ---------- persistence ----------
+     On a shared device every student keeps her OWN stars, completed
+     activities, scores and certificates, stored under her own key. One
+     student's login can never overwrite, merge into or delete another
+     student's record — entries are append-only. */
   load() {
     try { this.pass = JSON.parse(sessionStorage.getItem('sb_pass') || 'null'); } catch { this.pass = null; }
-    try { this.progress = JSON.parse(localStorage.getItem('sb_progress') || '{"stars":0,"done":[]}'); } catch {}
-    try { this.cert = JSON.parse(localStorage.getItem('sb_cert') || '{"awards":[],"current":null}'); } catch {}
-    if (!this.cert || !Array.isArray(this.cert.awards)) this.cert = { awards: [], current: null };
+    try { this.students = JSON.parse(localStorage.getItem(SB_STUDENTS_KEY) || '[]'); } catch { this.students = []; }
+    if (!Array.isArray(this.students)) this.students = [];
+    this.students = this.students.filter(s => s && typeof s.key === 'string' && typeof s.name === 'string');
+    this.currentKey = this.pass ? sbStudentKey(this.pass.name, this.pass.school) : null;
+    this.loadStudentState(this.currentKey);
+  },
+  loadStudentState(key) {
+    let progress = { stars:0, done:[] }, cert = { awards: [], current: null };
+    if (key) {
+      try { progress = JSON.parse(localStorage.getItem(SB_PROGRESS_KEY + key)) || progress; } catch {}
+      try { cert = JSON.parse(localStorage.getItem(SB_CERT_KEY + key)) || cert; } catch {}
+    }
+    this.progress = (progress && typeof progress === 'object') ? progress : { stars:0, done:[] };
+    if (!Array.isArray(this.progress.done)) this.progress.done = [];
+    if (!Array.isArray(this.progress.badges)) this.progress.badges = [];
+    this.cert = (cert && Array.isArray(cert.awards)) ? cert : { awards: [], current: null };
   },
   // Storage can be disabled (private browsing, quota, sandbox policy). Keep the
   // in-memory student flow working even when persistence is unavailable.
   savePass(p)   { this.pass = p; try { sessionStorage.setItem('sb_pass', JSON.stringify(p)); } catch {} },
-  saveProgress(){ try { localStorage.setItem('sb_progress', JSON.stringify(this.progress)); } catch {} },
-  saveCert()    { try { localStorage.setItem('sb_cert', JSON.stringify(this.cert)); } catch {} },
+  saveProgress(){ if (!this.currentKey) return; try { localStorage.setItem(SB_PROGRESS_KEY + this.currentKey, JSON.stringify(this.progress)); } catch {} },
+  saveCert()    { if (!this.currentKey) return; try { localStorage.setItem(SB_CERT_KEY + this.currentKey, JSON.stringify(this.cert)); } catch {} },
+  // Re-read before writing: another tab may have registered a student meanwhile.
+  saveStudents() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(SB_STUDENTS_KEY) || '[]');
+      if (Array.isArray(stored)) {
+        for (const s of stored) {
+          if (s && typeof s.key === 'string' && !this.students.some(x => x.key === s.key)) this.students.push(s);
+        }
+      }
+      localStorage.setItem(SB_STUDENTS_KEY, JSON.stringify(this.students));
+    } catch {}
+  },
+  /* Register / switch to a student on this device. Append-only: never removes
+     or overwrites another student's slot. Returns true when the student changed. */
+  registerStudent(p) {
+    if (!p || !p.name || !p.school) return false;
+    const key = sbStudentKey(p.name, p.school);
+    const changed = key !== this.currentKey;
+    let s = this.students.find(x => x.key === key);
+    if (!s) { s = { key, name: p.name, school: p.school }; this.students.push(s); }
+    else { s.name = p.name; s.school = p.school; }   // display text only
+    this.saveStudents();
+    this.adoptSharedProgress(key);
+    this.currentKey = key;
+    this.loadStudentState(key);
+    this.savePass({ name: p.name, school: p.school });
+    return changed;
+  },
+  // One-time carry-over of the pre-existing single-student slots so nothing
+  // already earned on this device is lost. The originals are left in place.
+  adoptSharedProgress(key) {
+    if (this.students.length !== 1) return;
+    try {
+      const legacyP = localStorage.getItem('sb_progress');
+      if (legacyP && !localStorage.getItem(SB_PROGRESS_KEY + key)) {
+        localStorage.setItem(SB_PROGRESS_KEY + key, legacyP);
+      }
+    } catch {}
+    try {
+      const legacyC = localStorage.getItem('sb_cert');
+      if (legacyC && !localStorage.getItem(SB_CERT_KEY + key)) {
+        localStorage.setItem(SB_CERT_KEY + key, legacyC);
+      }
+    } catch {}
+  },
 
   /* only issued at 80%+ — never below */
   issueCertificate(award) {
     if (!award || typeof award.score !== 'number' || award.score < 80) return false;
     const i = this.cert.awards.findIndex(a => a.key === award.key);
+    const prev = i === -1 ? null : this.cert.awards[i];
     if (i === -1) this.cert.awards.push(award);
-    else if (award.score > this.cert.awards[i].score) this.cert.awards[i] = award;
+    else if (award.score > prev.score) this.cert.awards[i] = award;
+    else { this.cert.current = award.key; this.saveCert(); return true; }
     this.cert.current = award.key;
     this.saveCert();
     if (typeof renderCert === 'function') renderCert();
+    // Report the certificate to the teacher dashboard as its own event.
+    window.BridgeClient?.certificate(award);
     return true;
   },
   useCertificate(key) {
@@ -572,6 +651,18 @@ const RENDER = {
         <span class="badge-med">${ICONS[b.icon]}</span>
         <b>${b.name}</b><span>${b.desc}</span>
       </div>`).join('');
+    // Report each newly earned badge once, under the student who earned it.
+    if (SB.currentKey) {
+      SB.progress.badges = Array.isArray(SB.progress.badges) ? SB.progress.badges : [];
+      let added = false;
+      for (const id of unlocked) {
+        if (SB.progress.badges.includes(id)) continue;
+        SB.progress.badges.push(id);
+        added = true;
+        window.BridgeClient?.achievement(SB.badges.find(b => b.id === id) || { id });
+      }
+      if (added) SB.saveProgress();
+    }
     return unlocked.size;
   },
   levelsProgress() {
@@ -699,8 +790,12 @@ function initPassForm() {
     });
     if (!ok) { toast('أكملي الحقول أولًا يا صغيرتي'); return; }
 
-    SB.savePass({ name, school });
+    // Registers this student on the device and switches the site to her own
+    // record. A second student on the same device gets her own independent slot
+    // and her own server student — the previous student's data is untouched.
+    const switched = SB.registerStudent({ name, school });
     window.BridgeClient?.setIdentity(SB.pass, { force: true });
+    if (switched) SB.renderAll();
     applyPassUI({ celebrate: true });
   });
 
