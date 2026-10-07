@@ -277,6 +277,10 @@ section{scroll-margin-top:18px}
 .field input:focus{border-bottom-color:var(--sky)}
 .field.is-error input{border-bottom-color:var(--blush);animation:shake .4s}
 .f-error{display:block;color:var(--blush);font-size:.72rem;font-weight:700;margin-top:5px}
+/* Functional API feedback for the gateway; it keeps the existing form language. */
+.pass-submit-status{min-height:1.2em;text-align:center;line-height:1.65}
+.pass-submit-status.is-pending{color:#6A5A97}
+.btn-send:disabled{opacity:.68;cursor:wait;transform:none}
 @keyframes shake{25%{transform:translateX(4px)}50%{transform:translateX(-4px)}75%{transform:translateX(2px)}}
 
 .pass-perf{position:relative;border-top:1.6px dashed rgba(55,48,75,.22);margin:6px -24px 0}

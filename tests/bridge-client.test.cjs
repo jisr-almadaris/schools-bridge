@@ -23,11 +23,12 @@ const success = req => ({body:req.path === 'student/identify'
   ? {ok:true,student_id:12,submission_token:'test-token'} : {ok:true,stored:true}});
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const pass = {name:'سارة محمد',school:'مدرسة الاختبار'};
-test('public API base is the single-hyphen production hostname', async () => {
-  assert.ok(source.includes("const API = 'https://schools-bridge-admin.onrender.com/api/public/';"));
-  assert.ok(!source.includes('schools--bridge-admin'));
+test('public API base is the current double-hyphen production hostname', async () => {
+  assert.ok(source.includes("const API = 'https://schools--bridge-admin.onrender.com/api/public/';"));
+  const retiredApi = `const API = 'https://${['schools', 'bridge-admin.onrender.com'].join('-')}`;
+  assert.ok(!source.includes(retiredApi));
   const s = setup(success); s.client.setIdentity(pass); await settle();
-  assert.equal(s.calls[0].url, 'https://schools-bridge-admin.onrender.com/api/public/student/identify');
+  assert.equal(s.calls[0].url, 'https://schools--bridge-admin.onrender.com/api/public/student/identify');
 });
 test('identity and result use only public contract, no cookies; result rendered twice sends once', async () => {
   const s = setup(success); s.client.setIdentity(pass);
@@ -121,6 +122,19 @@ test('explicit submission re-identifies unchanged identity and repairs a missing
   s.ctx.localStorage.setItem('bridge_roster',JSON.stringify(roster));
   const t=setup(success,s.ctx); t.client.setIdentity(pass); await settle();
   assert.equal(t.calls.filter(c=>c.path==='student/identify').length,1);
+});
+test('gateway can wait for a confirmed backend identity instead of pretending registration succeeded', async () => {
+  const s=setup(success);
+  const confirmed = await s.client.setIdentity(pass,{force:true,waitForConfirmation:true});
+  assert.equal(confirmed.student_id,12);
+  assert.match(confirmed.visitor_id,/^[A-Za-z0-9._:\-]{6,80}$/);
+  assert.equal(s.calls.filter(c=>c.path==='student/identify').length,1);
+});
+test('a failed confirmed registration rejects visibly while retaining the retry item', async () => {
+  const s=setup(()=>({status:503,body:{ok:false,error:'public_api_disabled'}}));
+  await assert.rejects(s.client.setIdentity(pass,{force:true,waitForConfirmation:true}), /public_api_disabled/);
+  assert.equal(JSON.parse(s.ctx.sessionStorage.getItem('bridge_queue')).length,1);
+  assert.match(s.logs.join('\n'),/student\/identify 503 public_api_disabled/);
 });
 test('browser offline hint does not prevent an attempted request', async () => {
   const s=setup(success); s.ctx.navigator.onLine=false;
@@ -232,21 +246,40 @@ test('a certificate is its own event and never overwrites the score record', asy
   assert.equal(cert.body.score,80); assert.equal(cert.body.max_score,100);
   assert.equal(cert.opts.headers.Authorization,'Bearer test-token');
 });
-test('a repeated certificate result reuses its event id so the server stores it once', async () => {
+test('a repeated certificate result reuses a scoped event id so the server stores it once', async () => {
   const s = setup(success); s.client.setIdentity(pass); await settle();
   s.client.certificate({key:'book-picnic', score:100});
   s.client.certificate({key:'book-picnic', score:100});
   await settle();
-  assert.deepEqual(s.calls.filter(c=>c.path==='activity/result').map(c=>c.body.event_id),
-    ['cert-book-picnic-100','cert-book-picnic-100']);
+  const ids = s.calls.filter(c=>c.path==='activity/result').map(c=>c.body.event_id);
+  assert.equal(ids.length, 2);
+  assert.equal(ids[0], ids[1]);
+  assert.match(ids[0], /^cert-[a-z0-9]+-book-picnic-100$/);
 });
 test('an improved certificate score is a separate record', async () => {
   const s = setup(success); s.client.setIdentity(pass); await settle();
   s.client.certificate({key:'book-picnic', score:80});
   s.client.certificate({key:'book-picnic', score:100});
   await settle();
-  assert.deepEqual(s.calls.filter(c=>c.path==='activity/result').map(c=>c.body.event_id),
-    ['cert-book-picnic-80','cert-book-picnic-100']);
+  const ids = s.calls.filter(c=>c.path==='activity/result').map(c=>c.body.event_id);
+  assert.notEqual(ids[0], ids[1]);
+  assert.match(ids[0], /^cert-[a-z0-9]+-book-picnic-80$/);
+  assert.match(ids[1], /^cert-[a-z0-9]+-book-picnic-100$/);
+});
+test('the same award for two students uses two independent idempotency keys', async () => {
+  const s = setup(perVisitor);
+  s.client.setIdentity(sA); await settle();
+  s.client.certificate({key:'book-picnic', score:100});
+  s.client.achievement({id:'reader', name:'قارئة واعدة'});
+  s.client.setIdentity(sB); await settle();
+  s.client.certificate({key:'book-picnic', score:100});
+  s.client.achievement({id:'reader', name:'قارئة واعدة'});
+  await settle();
+  const certs=s.calls.filter(c=>c.body.activity_type==='certificate');
+  const badges=s.calls.filter(c=>c.body.activity_type==='achievement');
+  assert.equal(certs.length,2); assert.notEqual(certs[0].body.event_id,certs[1].body.event_id);
+  assert.equal(badges.length,2); assert.notEqual(badges[0].body.event_id,badges[1].body.event_id);
+  assert.notEqual(certs[0].opts.headers.Authorization,certs[1].opts.headers.Authorization);
 });
 test('an earned badge carries a stable key so the server stores it once', async () => {
   const s = setup(success); s.client.setIdentity(pass); await settle();
