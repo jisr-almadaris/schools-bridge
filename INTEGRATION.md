@@ -1,6 +1,6 @@
 # Student public API integration
 
-Backend: `https://schools--bridge-admin.onrender.com`. The production student client uses this exact origin for every public API request; no localhost, legacy Render hostname, credential, or database access is used.
+Backend: `https://schools-bridge-admin.onrender.com`. The production student client uses this exact origin for every public API request; no localhost, legacy Render hostname, credential, or database access is used.
 
 ## Changes
 

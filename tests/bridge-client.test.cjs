@@ -23,12 +23,12 @@ const success = req => ({body:req.path === 'student/identify'
   ? {ok:true,student_id:12,submission_token:'test-token'} : {ok:true,stored:true}});
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const pass = {name:'سارة محمد',school:'مدرسة الاختبار'};
-test('public API base is the current double-hyphen production hostname', async () => {
-  assert.ok(source.includes("const API = 'https://schools--bridge-admin.onrender.com/api/public/';"));
-  const retiredApi = `const API = 'https://${['schools', 'bridge-admin.onrender.com'].join('-')}`;
+test('public API base is the verified single-hyphen production hostname', async () => {
+  assert.ok(source.includes("const API = 'https://schools-bridge-admin.onrender.com/api/public/';"));
+  const retiredApi = `const API = 'https://${['schools', '', 'bridge-admin.onrender.com'].join('-')}`;
   assert.ok(!source.includes(retiredApi));
   const s = setup(success); s.client.setIdentity(pass); await settle();
-  assert.equal(s.calls[0].url, 'https://schools--bridge-admin.onrender.com/api/public/student/identify');
+  assert.equal(s.calls[0].url, 'https://schools-bridge-admin.onrender.com/api/public/student/identify');
 });
 test('identity and result use only public contract, no cookies; result rendered twice sends once', async () => {
   const s = setup(success); s.client.setIdentity(pass);
