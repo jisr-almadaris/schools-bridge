@@ -270,8 +270,14 @@
       }, attempt.owner);
     }
   }
-  function certificate(award) {
-    const owner = current;
+  function certificate(award, ownerOverride) {
+    // ownerOverride lets a caller that captured its own student at launch
+    // (e.g. an external game attempt opened in another tab/iframe) report
+    // the certificate to THAT student even if a different student becomes
+    // "current" in this tab before the award arrives. Existing call sites
+    // that award a certificate for the student active right now keep their
+    // exact behavior by omitting the second argument.
+    const owner = ownerOverride || current;
     if (!owner || !award || !Number.isFinite(award.score)) return;
     const key = slug(award.key), score = Math.round(award.score);
     enqueue('activity/result', {
