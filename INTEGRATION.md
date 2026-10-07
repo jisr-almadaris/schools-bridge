@@ -7,6 +7,7 @@ Backend: `https://schools-bridge-admin.onrender.com`. The production student cli
 - `bridge-client.js`: JSON-only public API client; no cookies, teacher credentials, or database access.
 - `index.html`: loads the client before the existing application. No markup/style/content redesign.
 - `app.js`: hooks gateway submission/resume, external game/vocabulary opens, worksheet views/print launches, reading opens/results, and assessment opens/results/retries.
+- `app.js` / `bridge-client.js`: a shared, central cross-origin **game reporting bridge** (see below) so completion/score/certificate events from any external game/vocabulary activity can reach the backend under the SAME student who opened it, with no per-game code.
 - Reading and assessment attempts report actual correct-answer counts and totals, percentage, and completed status even below the passing threshold. Original local stars, best scores, certificates, and completion rules are unchanged.
 - Assessment attempts also report to `assessment/result` with verification/progress/mastery station keys for station-specific dashboard records. This is intentionally a separate record with a separate event ID from the generic activity result.
 - Existing content IDs are the API activity keys (e.g. `book-picnic`, `st-checkpoint`). No invented numeric mappings.
@@ -31,9 +32,86 @@ Session queue persists reloads and offline reconnects **within the tab session**
 
 The supplied backend contract uses the same visitor ID to resume the same server student, even when name/school are edited. This client cannot turn a shared-browser name edit into a separate server student without a backend-supported identity-switch contract. It does not invent one.
 
+## Shared cross-origin game reporting bridge (fixes: open worked, completion/score/certificate did not)
+
+**Confirmed symptom**: a real, already-registered student opened `game-comparisons` — the Teacher
+Control Center correctly recorded "فتح نشاط — game-comparisons" — but her completion, real score
+and earned certificate never arrived, even though she finished the game and saw a certificate.
+
+**Root cause (three separate gaps, all inside this repository, all now fixed centrally)**:
+
+1. Every connected game/vocabulary card was a native `<a target="_blank" rel="noopener noreferrer">`.
+   Per the HTML living standard, `rel="noreferrer"` **implies `noopener` too**, so the new tab's
+   `window.opener` was always `null`. Even a game that tries to call
+   `window.opener.postMessage(...)` has no window object to call it on — the reply channel was
+   structurally severed before a single byte of game code ever ran.
+2. This page never had a single `window.addEventListener('message', …)` handler. Even a game that
+   *could* reach back across origins had nothing on this side listening for it.
+3. No code anywhere called `BridgeClient.result()`/`BridgeClient.certificate()` for a game. Those
+   two functions existed and were already tested, but were wired only to the in-site reading
+   quizzes and assessment stations — never to the external games grid. "فتح نشاط" worked only
+   because the click handler calls `BridgeClient.start()` synchronously, before the browser
+   navigates away, using the identity already active in this tab.
+
+A local artifact (`server.py`, a same-origin iframe proxy for the Comparisons game, worked around
+by a previous attempt because Arena games send `X-Frame-Options: SAMEORIGIN`) confirms a prior
+attempt assumed *iframe* embedding. That proxy requires a Python process and **cannot run on
+GitHub Pages** (100% static hosting) and was never wired into `app.js` — it is dead, non-production
+code, left untouched here. The deployable fix for a statically-hosted site is a new tab with its
+opener preserved, which is what this change implements.
+
+**The fix** — one shared bridge, in `app.js`, used by every current and future game/vocabulary
+activity that shares the exact same launch path (not special-cased to Comparisons):
+
+- The native link markup keeps working with no JS (same `<a href>` navigation, same appearance),
+  but drops `rel="noopener noreferrer"` in favor of `rel="opener"` + `referrerpolicy="no-referrer"`
+  — the referrer is still hidden from the game, but `window.opener` now survives so a reply is
+  physically possible. A plain click is intercepted to open the same URL through a JS `window.open`
+  call (also without a `noopener` feature) so the attempt can be tracked; modified clicks
+  (ctrl/cmd/shift/middle-click → new window/background tab) keep the browser's native, untouched
+  behavior.
+- `BridgeClient.start()` (open event, unchanged) now also registers the in-flight attempt
+  (its captured student `owner`) in an in-memory map keyed by `origin + activityId`, both for the
+  new-tab path and for the in-site iframe player (`openPlayer`/`g.play`, currently unused by any
+  catalog entry but now wired identically) — reporting survives either context.
+- One central `window.addEventListener('message', …)` validates the sender's `event.origin`
+  against the exact set of origins already present in the `games`/`vocabulary` catalog (anything
+  else is ignored — a stranger origin can never inject a fake result), matches the message to the
+  attempt captured at THAT activity's own launch (a message for an activity never opened in this
+  tab, or arriving after the owner changed, is ignored — it can never attach to another student or
+  invent a result for nobody), and then calls the exact same, already-tested
+  `BridgeClient.result()` / `BridgeClient.certificate(award, attempt.owner)` used by reading and
+  assessment. `certificate()` now accepts an optional explicit owner so a certificate can never be
+  attributed to "whichever student is active now" if the active student changed while the game tab
+  was still open.
+- The contract a cooperating game reports back with (new tab: `window.opener.postMessage`; iframe:
+  `parent.postMessage`), targeting this site's origin:
+  ```js
+  { source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'completed', score, maxScore }
+  { source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'certificate', score, title? }
+  ```
+  Unknown message shapes, unknown `type`s, non-finite scores, and messages for badges/onboarding
+  are rejected/ignored with a diagnostic `console.warn` (never silently dropped, never scored as an
+  achievement) — badges and onboarding remain unscored exactly as before.
+
+**What this does and does not fix**: every structural gap inside this repository is now closed and
+covered by tests (`tests/game-bridge.test.cjs`). Whether the *live* Comparisons game (a separate,
+externally hosted, user-generated project — "Built with Arena · Content is user-generated and
+unverified" per its own footer — not part of this repository and not inspectable from here; it
+re-asks the student's name itself, confirming it has no existing integration with this site's
+identity) actually calls `window.opener.postMessage(...)` with this contract when it finishes is
+outside this repository's control. If it does not yet, this bridge is the receiving half that makes
+it possible the moment the game's own code sends it — no further change would be needed on this
+side. No backend change is required; the existing `activity/result` contract is reused as-is.
+
 ## Limits that must not be misrepresented
 
-- External game sources are not in this repository and expose no result callback here. Launches are reported; completion/scores cannot be observed. Internal activities are fully covered: the reading quizzes and the three assessment stations report opens, completions, scores, certificates and badges; worksheet views/prints report opens only (a static sheet has no completion signal).
+- External game sources are not in this repository. The game-reporting bridge above covers the
+  *receiving* half for every game/vocabulary activity; a game still has to call
+  `window.opener.postMessage(...)` with the documented contract for completion/score/certificate to
+  actually arrive. Internal activities are fully covered end-to-end: the reading quizzes and the
+  three assessment stations report opens, completions, scores, certificates and badges with no
+  external dependency.
 - Worksheets are static images for viewing/printing. There is no worksheet submission, answer check, or completion signal. A view/print is reported as an open, never as a completed/scored worksheet.
 - Backend catalog flags control score storage. Published catalog keys and `score_capture_supported` must match the existing frontend IDs before score visibility can be certified.
 - Gateway validation requires a school and at least two name parts before a registration request is attempted. Backend rejection is surfaced as a safe retry state; the site no longer marks a local pass as registered when the server has not confirmed it.
@@ -47,9 +125,11 @@ node --check bridge-client.js
 node --check app.js
 node --test tests/bridge-client.test.cjs   # 30 tests — public API contract
 node --test tests/app-students.test.cjs    #  6 tests — per-student site storage
+node --test tests/game-bridge.test.cjs     # 12 tests — shared cross-origin game reporting bridge
+node --test tests/*.test.cjs               # 48 tests — full suite
 ```
 
-Tests mock the supplied HTTP contract, not the production database/dashboard. Cover payloads/auth, idempotency, token recovery, identity capture, offline replay/reload, retries, rate limiting, disabled API, storage failure, honest open-only tracking, independent multi-student records, shared-device switching, append-only rosters, cross-tab merge, and per-student certificate/badge reporting.
+Tests mock the supplied HTTP contract, not the production database/dashboard. Cover payloads/auth, idempotency, token recovery, identity capture, offline replay/reload, retries, rate limiting, disabled API, storage failure, honest open-only tracking, independent multi-student records, shared-device switching, append-only rosters, cross-tab merge, per-student certificate/badge reporting, and (new) the shared game-reporting bridge: open uses the correct student, completion/score/certificate report for that same student, no duplicate student is ever created, a result cannot attach to a different student even if the active student changes mid-flight, an untracked/unknown-origin message is ignored, registration-only metrics and badges/onboarding stay unaffected, reporting survives both the new-tab and the in-site iframe-player launch context, API errors are logged rather than swallowed, and the fix is shared across games (proven with a second, unrelated game).
 
 Live checks during implementation:
 - Page-fetch GET `/api/public/activities` returned `Not Found`.

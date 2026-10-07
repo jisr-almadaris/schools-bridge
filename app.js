@@ -430,6 +430,110 @@ SB.grantStars = function (id, n) {           // hook for the official games when
   SB.saveProgress();
 };
 
+/* ============================================================
+   Shared cross-origin GAME REPORTING BRIDGE
+   ------------------------------------------------------------
+   Every external game/vocabulary activity (new tab OR, for a future
+   in-site iframe, g.play) shares this exact code — fixing it here fixes
+   open+completion+score+certificate reporting for ALL of them at once,
+   not just "جزر المقارنات" (game-comparisons).
+
+   "فتح نشاط" already worked because the click handler below calls
+   BridgeClient.start() synchronously, BEFORE the browser navigates away,
+   using the identity that is already active in this tab. Completion/score/
+   certificate never reported because nothing on either side could carry a
+   message back once the game opened:
+     1. The destination card's native <a> used rel="noopener noreferrer".
+        Per the HTML spec, "noreferrer" implies "noopener" too, so the new
+        tab's window.opener was always null — a game trying to call
+        window.opener.postMessage(...) had no window object to call it on.
+     2. This page never had a `message` listener at all, so even a game
+        that *could* reach the opener had nothing listening on this end.
+     3. No code anywhere called BridgeClient.result()/.certificate() for a
+        game — those two functions were wired only to the in-site reading
+        quizzes and assessment stations.
+   This block fixes all three for every current and future game sharing
+   this launch path, without changing any game's content or the
+   registration/identity system.
+   ------------------------------------------------------------
+   Contract a game reports back with (new tab: window.opener.postMessage;
+   iframe: parent.postMessage), targeting this origin:
+     { source:'schools-bridge-game', activityId, type:'completed', score, maxScore }
+     { source:'schools-bridge-game', activityId, type:'certificate', score, title? }
+   Messages are matched ONLY to the attempt captured at THAT activity's own
+   launch — never to "whichever student is active now" — and are accepted
+   ONLY from an origin already present in the games/vocabulary catalog.
+   Anything else (wrong origin, unknown shape, no tracked attempt, invalid
+   score) is rejected/ignored and logged; it is never silently dropped
+   without a trace, and it never creates or touches another student.
+   ============================================================ */
+const GAME_ORIGINS = new Set();
+for (const activity of [...SB.data.games, ...SB.data.vocabulary]) {
+  for (const link of [activity.url, activity.play, activity.launchUrl]) {
+    if (!link) continue;
+    try { GAME_ORIGINS.add(new URL(link, location.href).origin); } catch { /* malformed catalog entry: ignore */ }
+  }
+}
+// One in-flight attempt per (origin, activity) for THIS tab, keyed at launch
+// time. A student switch, reload-elsewhere, or a second registration later
+// in the same tab cannot repoint an attempt that is already in flight.
+const gameAttempts = new Map();
+const gameAttemptKey = (origin, activityId) => origin + '::' + activityId;
+
+function markGameVisited(activityId) {                                 // visit counts toward progress
+  if (SB.stars(activityId) < 1) {
+    SB.grantStars(activityId, 1);
+    const card = document.querySelector(`.dest[data-id="${activityId}"]`);
+    if (card && card.querySelectorAll('.dst')[0]) card.querySelectorAll('.dst')[0].classList.add('on');
+  }
+}
+function trackGameAttempt(activity, kind, urlForOrigin) {
+  const attempt = window.BridgeClient?.start(activity, kind);
+  if (attempt?.owner && urlForOrigin) {
+    try { gameAttempts.set(gameAttemptKey(new URL(urlForOrigin, location.href).origin, activity.id), attempt); }
+    catch { /* malformed URL: open is still reported, completion cannot be matched back */ }
+  }
+  markGameVisited(activity.id);
+  return attempt;
+}
+function launchGameTab(activity, kind, href) {
+  const target = href || activity.url;
+  trackGameAttempt(activity, kind, target);
+  if (target) window.open(target, '_blank');   // no 'noopener' feature: keeps window.opener for the bridge
+}
+
+window.addEventListener('message', event => {
+  if (!event || !GAME_ORIGINS.has(event.origin)) return;               // untrusted origin: never trusted
+  const data = event.data;
+  if (!data || typeof data !== 'object' || data.source !== 'schools-bridge-game') return;
+  const activityId = String(data.activityId || '');
+  const attempt = gameAttempts.get(gameAttemptKey(event.origin, activityId));
+  if (!attempt) { console.warn('Bridge game message ignored: no tracked attempt for', activityId); return; }
+
+  if (data.type === 'completed') {
+    const score = Number(data.score), maxScore = Number(data.maxScore);
+    if (!Number.isFinite(score) || !Number.isFinite(maxScore) || maxScore <= 0) {
+      console.warn('Bridge game message rejected: invalid_score', activityId);
+      return;
+    }
+    window.BridgeClient?.result(attempt, score, maxScore);              // same, already-tested reporting path
+    const pct = Math.round(score / maxScore * 100);
+    const stars = pct >= 80 ? 3 : (pct >= 60 ? 2 : (score > 0 ? 1 : 0));
+    SB.grantStars(activityId, stars);
+    const card = document.querySelector(`.dest[data-id="${activityId}"]`);
+    if (card) card.querySelectorAll('.dst').forEach((el, i) => { if (i < SB.stars(activityId)) el.classList.add('on'); });
+  } else if (data.type === 'certificate') {
+    const score = Number(data.score);
+    if (!Number.isFinite(score)) { console.warn('Bridge game message rejected: invalid_certificate_score', activityId); return; }
+    // The owner captured at launch is passed explicitly so the certificate
+    // can never land on a different student even if this tab's active
+    // student changed while the game tab was open.
+    window.BridgeClient?.certificate({ key: activityId, title: data.title || attempt.activity.title, score }, attempt.owner);
+  } else {
+    console.warn('Bridge game message ignored: unknown_type', String(data.type || ''));
+  }
+});
+
 function destCard(g) {
   const stars = SB.stars(g.id);
   const playCtrl = g.url
@@ -453,9 +557,16 @@ function destCard(g) {
       ${playCtrl}
     </div>
   </article>`;
-  /* connected games: the whole card is a NATIVE link — no JS needed */
+  /* connected games: the whole card is a NATIVE link. A plain click is
+     intercepted (see the shared game-reporting bridge below) so the tab can
+     be opened while keeping window.opener alive — required for the game to
+     ever report completion/score/certificate back to this page. rel is
+     deliberately NOT "noopener"/"noreferrer" (noreferrer implies noopener
+     per spec too): referrerpolicy="no-referrer" already hides the referrer
+     without severing the opener link. Middle-click / ctrl/cmd/shift-click
+     still navigate natively (see the click handler) and keep working. */
   return g.url
-    ? `<a class="dest-link" data-card="${g.id}" href="${g.url}" target="_blank" rel="noopener noreferrer">${card}</a>`
+    ? `<a class="dest-link" data-card="${g.id}" href="${g.url}" target="_blank" rel="opener" referrerpolicy="no-referrer">${card}</a>`
     : card;
 }
 
@@ -524,15 +635,8 @@ const RENDER = {
       host.addEventListener('click', e => {
         const b = e.target.closest('[data-play]'); if (!b) return;
         const g = SB.data.games.find(x => x.id === b.dataset.play); if (!g) return;
-        if (g.play) { openPlayer(g); }                                 // in-site responsive player
-        else if (g.url) {
-          window.open(g.url, '_blank', 'noopener');                    // connected destination → new tab
-          if (SB.stars(g.id) < 1) {                                    // visit counts toward progress
-            SB.grantStars(g.id, 1);
-            const card = document.querySelector(`.dest[data-id="${g.id}"]`);
-            if (card && card.querySelectorAll('.dst')[0]) card.querySelectorAll('.dst')[0].classList.add('on');
-          }
-        }
+        if (g.play) { openPlayer(g, 'game'); }                         // in-site responsive player
+        else if (g.url) { launchGameTab(g, 'game'); }                  // connected destination → new tab (opener kept)
         else { toast(`وجهة «${g.title}» تُجهَّز للانطلاق — رابط اللعبة الرسمي يصل هنا قريبًا`); }
       });
     }
@@ -545,20 +649,16 @@ const RENDER = {
     if (!host.dataset.bound) {
       host.dataset.bound = '1';
       host.addEventListener('click', e => {
-        const link = e.target.closest('.dest-link');
-        if (link) {
-          const id = link.dataset.card;
-          if (id && SB.stars(id) < 1) {
-            SB.grantStars(id, 1);
-            const s0 = link.querySelectorAll('.dst')[0];
-            if (s0) s0.classList.add('on');
-          }
-          return;
-        }
+        // .dest-link clicks (connected destinations) are handled once,
+        // centrally, by the document-level listener below — it reports the
+        // open event AND tracks the attempt for completion/score/certificate
+        // reporting. Keeping a single path here avoids two places granting
+        // stars or starting attempts differently for the same click.
+        if (e.target.closest('.dest-link')) return;
         const b = e.target.closest('[data-play]'); if (!b) return;
         const g = SB.data.vocabulary.find(x => x.id === b.dataset.play); if (!g) return;
-        if (g.play) { openPlayer(g); }
-        else if (g.url) { window.open(g.url, '_blank', 'noopener'); }
+        if (g.play) { openPlayer(g, 'vocabulary'); }
+        else if (g.url) { launchGameTab(g, 'vocabulary'); }
         else { toast(`وجهة «${g.title}» تُجهَّز للانطلاق — قريبًا`); }
       });
     }
@@ -1142,7 +1242,7 @@ function ensurePlayer() {
   return wrap;
 }
 
-function openPlayer(g) {
+function openPlayer(g, kind = 'game') {
   if (!g.play) return;
   const wrap = ensurePlayer();
   $('#gpTitle').textContent = g.title;
@@ -1160,12 +1260,9 @@ function openPlayer(g) {
   const frame = $('#gpFrame');
   frame.onload = () => wrap.classList.remove('loading');
   frame.src = g.play;
-  /* وجهة تمت زيارتها → أول نجمة في نظام التقدّم */
-  if (SB.stars(g.id) < 1) {
-    SB.grantStars(g.id, 1);
-    const card = document.querySelector(`.dest[data-id="${g.id}"]`);
-    if (card && card.querySelectorAll('.dst')[0]) card.querySelectorAll('.dst')[0].classList.add('on');
-  }
+  /* وجهة تمت زيارتها → أول نجمة في نظام التقدّم، وتُسجَّل محاولة اللعبة
+     لتتبُّع رسائل الإنجاز/النتيجة/الشهادة القادمة من نفس الـ iframe. */
+  trackGameAttempt(g, kind, g.play);
 }
 
 function closePlayer() {
@@ -2005,10 +2102,26 @@ function renderAchJournal() {
   }
 }
 
-// Native external links keep their existing navigation and appearance.
+// Connected destination cards (.dest-link) keep their existing appearance —
+// still a real <a href> that works with no JS at all. A plain click is
+// upgraded here so the open event is reported AND the attempt is tracked
+// for the shared game-reporting bridge above (requires the window.open we
+// control, so window.opener survives for the game to report back).
 document.addEventListener('click', e => {
   const link = e.target.closest('.dest-link');
   if (!link) return;
   const activity = [...SB.data.games, ...SB.data.vocabulary].find(a => a.id === link.dataset.card);
-  if (activity) window.BridgeClient?.start(activity, SB.data.vocabulary.includes(activity) ? 'vocabulary' : 'game');
+  if (!activity) return;
+  const kind = SB.data.vocabulary.includes(activity) ? 'vocabulary' : 'game';
+  // Modified clicks (new window/background tab via ctrl/cmd/shift/middle
+  // button) keep the browser's native behavior and appearance exactly as
+  // before; the open event is still reported, it just cannot be tracked for
+  // a postMessage reply since we do not control that navigation.
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+    window.BridgeClient?.start(activity, kind);
+    markGameVisited(activity.id);
+    return;
+  }
+  e.preventDefault();
+  launchGameTab(activity, kind, link.href);
 });
