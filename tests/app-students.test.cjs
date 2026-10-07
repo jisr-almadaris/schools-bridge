@@ -128,6 +128,19 @@ test('per-student state is namespaced in storage, legacy slots left intact', () 
   assert.equal(ctx.localStorage.getItem('sb_progress'), JSON.stringify({ stars: 42, done: ['book-sea'] }));
 });
 
+test('an unconfirmed legacy browser pass is retried instead of shown as a server registration', () => {
+  const localStorage = store(), sessionStorage = store();
+  const key = JSON.stringify([A.name.toLowerCase(), A.school.toLowerCase()]);
+  localStorage.setItem('sb_progress::' + key, JSON.stringify({ stars: 5, done: ['book-sea'] }));
+  sessionStorage.setItem('sb_pass', JSON.stringify(A));
+  const { SB } = boot({ localStorage, sessionStorage });
+  assert.equal(SB.pass, null); // never claims Teacher Control Center registration without a token
+  assert.equal(sessionStorage.getItem('sb_pass'), 'null');
+  SB.registerStudent(A);
+  assert.equal(SB.progress.stars, 5); // local, namespaced history remains intact for retry
+  assert.deepEqual(plain(SB.progress.done), ['book-sea']);
+});
+
 test('registering a second student reports her own certificate, not the first one', () => {
   const { SB } = boot();
   SB.registerStudent(A);

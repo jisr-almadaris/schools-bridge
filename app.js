@@ -772,17 +772,30 @@ function applyPassUI({ celebrate = false } = {}) {
 function initPassForm() {
   const form = $('#passForm');
   const nameI = $('#studentName'), schoolI = $('#schoolName');
+  const send = $('button[type="submit"]', form), submitStatus = $('#passSubmitStatus');
+  const setSubmitState = (state, message = '') => {
+    const pending = state === 'pending';
+    send.disabled = pending;
+    nameI.disabled = pending;
+    schoolI.disabled = pending;
+    if (submitStatus) {
+      submitStatus.hidden = !message;
+      submitStatus.textContent = message;
+      submitStatus.classList.toggle('is-pending', pending);
+    }
+  };
 
-  form.addEventListener('submit', e => {
+  form.addEventListener('submit', async e => {
     e.preventDefault();
     const name = nameI.value.trim(), school = schoolI.value.trim();
+    const fullName = name.split(/\s+/).filter(Boolean);
     let ok = true;
 
-    [[nameI, name], [schoolI, school]].forEach(([input, val]) => {
+    [[nameI, name, fullName.length >= 2], [schoolI, school, school.length >= 2]].forEach(([input, val, valid]) => {
       const field = input.closest('.field');
       const err = field.querySelector('.f-error');
       field.classList.remove('is-error'); err.hidden = true;
-      if (val.length < 2) {
+      if (!valid) {
         ok = false;
         field.classList.add('is-error'); err.hidden = false;
         setTimeout(() => field.classList.remove('is-error'), 1400);
@@ -790,18 +803,43 @@ function initPassForm() {
     });
     if (!ok) { toast('أكملي الحقول أولًا يا صغيرتي'); return; }
 
-    // Registers this student on the device and switches the site to her own
-    // record. A second student on the same device gets her own independent slot
-    // and her own server student — the previous student's data is untouched.
-    const switched = SB.registerStudent({ name, school });
-    window.BridgeClient?.setIdentity(SB.pass, { force: true });
-    if (switched) SB.renderAll();
-    applyPassUI({ celebrate: true });
+    /* Do not claim that a gateway registration succeeded until the public API
+       has returned a server identity and submission token. A local browser
+       roster is not a substitute for a Teacher Control Center record. */
+    if (!window.BridgeClient?.setIdentity) {
+      setSubmitState('error', 'تعذّر الاتصال بخدمة التسجيل. تحقّقي من الاتصال ثم حاولي مرة أخرى.');
+      console.warn('Bridge registration unavailable: client_not_loaded');
+      return;
+    }
+    setSubmitState('pending', 'جارٍ حفظ بطاقة العبور بأمان…');
+    try {
+      await window.BridgeClient.setIdentity({ name, school }, { force: true, waitForConfirmation: true });
+      // Registers/switches local state only after the backend accepted identity.
+      // A different name + school is an independent append-only student slot.
+      const switched = SB.registerStudent({ name, school });
+      if (switched) SB.renderAll();
+      setSubmitState('success');
+      applyPassUI({ celebrate: true });
+    } catch (error) {
+      // BridgeClient emits a PII-free endpoint/status/code diagnostic. Keep the
+      // student-facing message generic and leave the form available for retry.
+      console.warn('Bridge registration was not confirmed:', error?.code || error?.message || 'network_error');
+      setSubmitState('error', 'تعذّر حفظ بطاقة العبور الآن. تحقّقي من الاتصال ثم حاولي مرة أخرى.');
+      toast('لم يتم تأكيد التسجيل بعد — حاولي مرة أخرى');
+    } finally {
+      if (!SB.pass || SB.pass.name !== name || SB.pass.school !== school) setSubmitState('idle', submitStatus?.textContent || '');
+      else {
+        send.disabled = false;
+        nameI.disabled = false;
+        schoolI.disabled = false;
+      }
+    }
   });
 
   $('#editPass').addEventListener('click', () => {
     nameI.value = SB.pass?.name || '';
     schoolI.value = SB.pass?.school || '';
+    if (submitStatus) { submitStatus.hidden = true; submitStatus.textContent = ''; }
     $('#passDone').hidden = true;
     $('#passForm').hidden = false;
     nameI.focus();
@@ -1035,13 +1073,33 @@ $('#printCert')?.addEventListener('click', () => {
 const CERT_CORNER = `<svg viewBox="0 0 90 90" fill="none" aria-hidden="true"><path d="M6 84C6 40 40 6 84 6" stroke="currentColor" stroke-width="2.2"/><path d="M18 84C18 52 52 18 84 18" stroke="currentColor" stroke-width="1.1" opacity=".55"/><path d="M30 84C30 60 60 30 84 30" stroke="currentColor" stroke-width=".8" opacity=".35"/><circle cx="84" cy="6" r="2.6" fill="currentColor"/><circle cx="6" cy="84" r="2.6" fill="currentColor"/></svg>`;
 
 SB.load();
-window.BridgeClient?.setIdentity(SB.pass);
+/* A historical browser-only pass is not proof that the Teacher Control Center
+   has a student record. Do not restore the “registered” UI until this browser
+   has a persisted backend token for that student. The typed details are kept
+   for an explicit retry; namespaced local progress remains untouched. */
+const unconfirmedPass = SB.pass && !window.BridgeClient?.isIdentityConfirmed?.(SB.pass) ? SB.pass : null;
+if (unconfirmedPass) {
+  SB.savePass(null);
+  SB.currentKey = null;
+  SB.loadStudentState(null);
+} else {
+  window.BridgeClient?.setIdentity(SB.pass);
+}
 SB.renderAll = function () {
   RENDER.games(); RENDER.vocabulary(); RENDER.books(); RENDER.worksheets();
   RENDER.stations(); RENDER.levelsProgress(); refreshProgress(); renderCert(); renderAchJournal();
 };
 SB.renderAll();
 initPassForm();
+if (unconfirmedPass) {
+  $('#studentName').value = unconfirmedPass.name;
+  $('#schoolName').value = unconfirmedPass.school;
+  const status = $('#passSubmitStatus');
+  if (status) {
+    status.hidden = false;
+    status.textContent = 'يلزم تأكيد بطاقة العبور مع الخدمة قبل متابعة الرحلة.';
+  }
+}
 applyPassUI();
 
 /* expose for the official content drop-in */

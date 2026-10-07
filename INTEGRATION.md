@@ -1,6 +1,6 @@
 # Student public API integration
 
-Backend: `https://schools-bridge-admin.onrender.com`. Implements the user-supplied contract; backend source is not accessible to this session.
+Backend: `https://schools--bridge-admin.onrender.com`. The production student client uses this exact origin for every public API request; no localhost, legacy Render hostname, credential, or database access is used.
 
 ## Changes
 
@@ -23,9 +23,9 @@ The client keeps a **durable student roster** in `localStorage` (`bridge_roster`
 
 On the site side (`app.js`), stars, completed activities, scores and certificates are namespaced per student (`sb_progress::<key>`, `sb_cert::<key>`). Switching students swaps the whole set, so one student's work can never overwrite or delete another's. Pre-existing single-student slots are carried over once into the first registered student's namespace; the originals are left in place.
 
-Certificates and badges are reported through the **existing, documented `activity/result` contract** as their own events, with their own activity keys (`<key>-cert`, `badge-<id>`) and their own event IDs, so a certificate record can never overwrite the score record it came from. Certificate event IDs are deterministic (`cert-<key>-<score>`), so re-sending the same certificate stores one record, while an improved score is a separate record.
+Certificates and badges are reported through the **existing, documented `activity/result` contract** as their own events, with their own activity keys (`<key>-cert`, `badge-<id>`) and their own event IDs, so a certificate record can never overwrite the score record it came from. Award event IDs are deterministic **per persistent student identity** (for example `cert-<visitor-scope>-<key>-<score>`): a resend stores one record, an improved score is separate, and two students earning the same award never share an idempotency key.
 
-Submitting the gateway form always requests identification, even when the name/school are unchanged, and an identity whose token is missing is re-identified on resume. The browser's `navigator.onLine` hint is not used to suppress attempts; a wrong hint can no longer silently block submissions. Failed requests emit console diagnostics limited to endpoint, HTTP status, and error code (no names, schools, visitor IDs, tokens, or payloads).
+Submitting the gateway form always requests identification, even when the name/school are unchanged, and an identity whose token is missing is re-identified on resume. The gateway does **not** show “registered successfully” until the backend has returned both `student_id` and `submission_token`; failure leaves the form open with a safe retry message. The browser's `navigator.onLine` hint is not used to suppress attempts; a wrong hint can no longer silently block submissions. Failed requests emit console diagnostics limited to endpoint, HTTP status, and error code (no names, schools, visitor IDs, tokens, or payloads).
 
 Session queue persists reloads and offline reconnects **within the tab session**, not permanent tab closure. Storage-denied environments fall back to memory: application writes to sessionStorage/localStorage are guarded, and bridge-client reads/writes are guarded, so a storage exception cannot abort gateway submission or local activity. Result duplicate responses count as success; opened has no server idempotency key, so an ambiguous network failure can cause an opened retry to count twice. Retries are serialized; 429 delays are honored, server/network failures retry after 60 seconds, invalid 400 payloads are logged and removed. Calls time out after 20 seconds without blocking local activity.
 
@@ -36,7 +36,7 @@ The supplied backend contract uses the same visitor ID to resume the same server
 - External game sources are not in this repository and expose no result callback here. Launches are reported; completion/scores cannot be observed. Internal activities are fully covered: the reading quizzes and the three assessment stations report opens, completions, scores, certificates and badges; worksheet views/prints report opens only (a static sheet has no completion signal).
 - Worksheets are static images for viewing/printing. There is no worksheet submission, answer check, or completion signal. A view/print is reported as an open, never as a completed/scored worksheet.
 - Backend catalog flags control score storage. Published catalog keys and `score_capture_supported` must match the existing frontend IDs before score visibility can be certified.
-- Existing gateway validation allows one-word names, whereas the backend requires two words. To preserve the requested unchanged student experience, backend rejection remains silent and local activity continues. Use a full, multi-word name for the real test.
+- Gateway validation requires a school and at least two name parts before a registration request is attempted. Backend rejection is surfaced as a safe retry state; the site no longer marks a local pass as registered when the server has not confirmed it.
 
 ## Verification
 
@@ -45,8 +45,8 @@ Run:
 ```sh
 node --check bridge-client.js
 node --check app.js
-node --test tests/bridge-client.test.cjs   # 27 tests — public API contract
-node --test tests/app-students.test.cjs    #  5 tests — per-student site storage
+node --test tests/bridge-client.test.cjs   # 30 tests — public API contract
+node --test tests/app-students.test.cjs    #  6 tests — per-student site storage
 ```
 
 Tests mock the supplied HTTP contract, not the production database/dashboard. Cover payloads/auth, idempotency, token recovery, identity capture, offline replay/reload, retries, rate limiting, disabled API, storage failure, honest open-only tracking, independent multi-student records, shared-device switching, append-only rosters, cross-tab merge, and per-student certificate/badge reporting.
