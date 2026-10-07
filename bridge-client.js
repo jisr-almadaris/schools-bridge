@@ -3,7 +3,7 @@
   'use strict';
 
   // This is the only production API origin used by the student site.
-  const API = 'https://schools--bridge-admin.onrender.com/api/public/';
+  const API = 'https://schools-bridge-admin.onrender.com/api/public/';
   const uid = () => globalThis.crypto?.randomUUID?.() ||
     'ev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
   const slug = value => String(value == null ? '' : value)
