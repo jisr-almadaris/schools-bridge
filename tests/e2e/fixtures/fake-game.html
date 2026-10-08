@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Fixture game</title>
+<style>
+  html,body{margin:0;height:100%;font-family:system-ui,sans-serif}
+  body{display:grid;place-items:center;background:linear-gradient(160deg,#FFF3C4,#FFD6E8)}
+  main{text-align:center;padding:24px}
+  h1{font-size:clamp(1.6rem,6vw,2.6rem);margin:0 0 8px;color:#3D3354}
+  p{color:#6A5A97}
+  button{margin:8px;font-size:1.2rem;padding:.7em 1.3em;border-radius:14px;border:0;background:#6A5A97;color:#fff;cursor:pointer}
+</style>
+</head>
+<body>
+<main>
+  <h1>Fixture game · __ACTIVITY__</h1>
+  <p>Scripted stand-in for an Arena game. Used only by the browser test.</p>
+  <button id="finish" type="button">Finish game (9/10)</button>
+  <button id="cert" type="button">Earn certificate (90)</button>
+</main>
+<script>
+  /* Same contract a cooperating game uses. Embedded: parent. New tab: opener. */
+  var ACTIVITY = '__ACTIVITY__';
+  function reply() { return window.parent !== window ? window.parent : window.opener; }
+  function send(payload) {
+    var target = reply();
+    if (!target) return false;
+    target.postMessage(Object.assign({ source: 'schools-bridge-game', activityId: ACTIVITY }, payload), '*');
+    return true;
+  }
+  document.getElementById('finish').addEventListener('click', function () { send({ type: 'completed', score: 9, maxScore: 10 }); });
+  document.getElementById('cert').addEventListener('click', function () { send({ type: 'certificate', score: 90, title: 'Fixture certificate' }); });
+</script>
+</body>
+</html>

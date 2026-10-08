@@ -1195,23 +1195,16 @@ html,body{overflow-x:clip;background:#F4F7FB}
 }
 
 /* ============================================================
-   IN-SITE GAME PLAYER (نافذة اللعب داخل الموقع)
+   FULL-SCREEN GAME VIEWER (game-viewer.js)
+   Full bleed: the game fills every pixel below a slim bar. No borders,
+   no side menus. Uses dynamic viewport units so mobile browser chrome
+   never clips the game or leaves a gap.
    ============================================================ */
 html.no-scroll, html.no-scroll body{overflow:hidden;overscroll-behavior:none}
-
-#gamePlayer{
-  position:fixed;inset:0;z-index:3100;display:none;flex-direction:column;
-  background:linear-gradient(175deg,#D8E9F7 0%,#EFE9F8 50%,#FBEFF5 100%);
-}
-#gamePlayer.open{display:flex;animation:gpIn .34s cubic-bezier(.25,.7,.3,1) both}
 @keyframes gpIn{from{opacity:0;transform:translateY(14px) scale(.99)}to{opacity:1;transform:none}}
+@keyframes gpSpin{to{transform:rotate(360deg)}}
 
-.gplayer-bar{
-  display:flex;align-items:center;gap:10px;
-  padding:calc(10px + env(safe-area-inset-top,0px)) 14px 10px;
-  background:rgba(255,255,255,.78);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-  border-bottom:1px solid rgba(197,184,232,.35);
-}
+/* shared with the reading, worksheet and quiz bars */
 .gp-back{
   display:inline-flex;align-items:center;gap:6px;flex:none;
   padding:9px 14px;border-radius:999px;border:1px solid rgba(197,184,232,.5);
@@ -1225,37 +1218,66 @@ html.no-scroll, html.no-scroll body{overflow:hidden;overscroll-behavior:none}
   font-size:.9rem;font-weight:800;color:#3D3354;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .gp-actions{display:inline-flex;gap:8px;margin-inline-start:auto;flex:none}
-.gp-close,.gp-ext{
-  display:inline-flex;align-items:center;justify-content:center;
-  width:40px;height:40px;border-radius:14px;cursor:pointer;text-decoration:none;
-  border:1px solid rgba(197,184,232,.5);background:#fff;color:#6A5A97;
-  transition:transform .2s ease;
-}
-.gp-close svg,.gp-ext svg{width:18px;height:18px}
-.gp-close:hover,.gp-ext:hover{transform:translateY(-1px)}
-.gp-close:active,.gp-ext:active{transform:scale(.95)}
 
-.gp-loader{
-  position:absolute;inset:0;z-index:3;display:none;flex-direction:column;gap:14px;
-  align-items:center;justify-content:center;
+.gv{
+  position:fixed;inset:0;z-index:3100;display:none;flex-direction:column;
+  height:100vh;height:100dvh;overflow:hidden;
   background:linear-gradient(175deg,#D8E9F7 0%,#EFE9F8 50%,#FBEFF5 100%);
 }
-#gamePlayer.loading .gp-loader{display:flex}
-.gp-loader b{font-size:.92rem;color:#6A5A97;font-weight:800}
-.gp-ring{
+.gv.open{display:flex;animation:gpIn .3s cubic-bezier(.25,.7,.3,1) both}
+.gv-bar{
+  flex:none;display:flex;align-items:center;gap:10px;min-height:52px;
+  padding:calc(7px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) 7px max(12px,env(safe-area-inset-left,0px));
+  background:rgba(255,255,255,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  box-shadow:0 8px 18px -16px rgba(90,70,140,.6);
+}
+.gv-back{
+  display:inline-flex;align-items:center;gap:9px;flex:none;min-height:40px;max-width:72%;
+  padding:6px 14px 6px 12px;border-radius:999px;cursor:pointer;
+  border:1px solid rgba(197,184,232,.6);background:#fff;color:#6A5A97;font-family:inherit;
+  box-shadow:0 6px 14px -8px rgba(120,100,170,.35);transition:transform .2s ease;
+}
+.gv-back svg{width:16px;height:16px;flex:none}
+.gv-back:hover{transform:translateY(-1px)}
+.gv-back:active{transform:scale(.96)}
+.gv-back:focus-visible,.gv-ext:focus-visible{outline:3px solid #C47FBF;outline-offset:2px}
+.gv-back-text{display:flex;flex-direction:column;align-items:flex-start;line-height:1.15;text-align:start;min-width:0}
+.gv-back-ar{font-size:.84rem;font-weight:800;white-space:nowrap}
+.gv-back-en{font-size:.66rem;font-weight:700;opacity:.8;white-space:nowrap}
+.gv-title{
+  flex:1 1 auto;min-width:0;text-align:center;font-size:.9rem;font-weight:800;color:#3D3354;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.gv-ext{
+  display:inline-flex;align-items:center;justify-content:center;flex:none;
+  width:40px;height:40px;border-radius:14px;text-decoration:none;color:#6A5A97;
+  border:1px solid rgba(197,184,232,.6);background:#fff;transition:transform .2s ease;
+}
+.gv-ext svg{width:18px;height:18px}
+.gv-ext:hover{transform:translateY(-1px)}
+.gv-stage{position:relative;flex:1 1 auto;min-height:0;background:#fff}
+.gv-frame{position:absolute;inset:0;width:100%;height:100%;border:0;display:block;background:#fff}
+.gv-loader{
+  position:absolute;inset:0;z-index:2;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  background:linear-gradient(175deg,#D8E9F7 0%,#EFE9F8 50%,#FBEFF5 100%);
+}
+.gv.loading .gv-loader{display:flex}
+.gv-loader b{font-size:.92rem;color:#6A5A97;font-weight:800;text-align:center;padding:0 16px}
+.gv-ring{
   width:42px;height:42px;border-radius:50%;
   border:4px solid rgba(197,184,232,.35);border-top-color:#C47FBF;
   animation:gpSpin 1s linear infinite;
 }
-@keyframes gpSpin{to{transform:rotate(360deg)}}
-
-.gp-frame{
-  flex:1 1 auto;width:100%;border:0;background:#fff;
-  padding-bottom:env(safe-area-inset-bottom,0px);
+@media (max-width:520px){
+  .gv-back-en{display:none}
+  .gv-bar{gap:8px;padding-inline:10px}
+}
+@media (max-width:360px){
+  .gv-title{display:none}
 }
 @media (prefers-reduced-motion: reduce){
-  #gamePlayer.open{animation:none}
-  .gp-ring{animation-duration:1.6s}
+  .gv.open{animation:none}
+  .gv-ring{animation-duration:1.6s}
 }
 
 /* ====================== worksheet library (cards) ====================== */

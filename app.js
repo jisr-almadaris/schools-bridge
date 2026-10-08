@@ -32,58 +32,58 @@ const SB = {
     games: [
       { id:'game-comparisons',         title:'جزر المقارنات',          tag:'Comparative & Superlatives', cat:'grammar', icon:'islands',
         thumb:'assets/game-islands.jpg',
-        url:'https://01a0cd6d-83ae-7de8-9b94-b5f56306d66f.arena.site/',
+        url:'https://01a0cd6d-83ae-7de8-9b94-b5f56306d66f.arena.site/', embed:false,
         play:null, launchUrl:null,
         desc:'جُزُرٌ تكبر خطوةً بعد خطوة — أتقني المقارنات وصيغة التفضيل لتصلي إلى القمة الذهبية.' },
       { id:'game-possessives',         title:'لغز الممتلكات المفقودة', tag:'Possessive Pronouns', cat:'grammar', icon:'keepsake',
         thumb:'assets/game-possessive.svg',
-        url:'https://01a0cdea-8a42-7fa6-92bb-2afbd61f567b.arena.site/',
+        url:'https://01a0cdea-8a42-7fa6-92bb-2afbd61f567b.arena.site/', embed:false,
         desc:'جزيرةٌ فقدت متعلقاتها — أعيدي كلَّ غرضٍ إلى صاحبه بضمائر الملكية الصحيحة.' },
       { id:'game-conjunctions',        title:'الفندق السحري',          tag:'Conjunctions', cat:'grammar', icon:'chain',
         thumb:'assets/game-hotel.jpg',
-        url:'https://01a0d3b3-4db8-735d-8140-4ef645996e9b.arena.site/',
+        url:'https://01a0d3b3-4db8-735d-8140-4ef645996e9b.arena.site/', embed:false,
         desc:'أبواب الفندق السحري لا تنفتح إلا بحلقات الوصل — اربطي الجمل بأدوات الربط المناسبة.' },
       { id:'game-present-simple',      title:'رحلتي',                  tag:'Present Simple', cat:'grammar', icon:'route',
         thumb:'assets/game-journey.jpg',
-        url:'https://01a0ceba-9a08-7f62-a83d-4f0c4afacf84.arena.site/',
+        url:'https://01a0ceba-9a08-7f62-a83d-4f0c4afacf84.arena.site/', embed:false,
         desc:'يومُكِ الجميل يتكرر على الطريق — ثبّتي قاعدة المضارع البسيط لتكتمل رحلتك اليومية.' },
       { id:'game-wh-questions',        title:'الفضاء',                 tag:'WH Questions', cat:'grammar', icon:'planet',
         thumb:'assets/game-space.jpg',
-        url:'https://01a0cf8a-dd7f-726a-85a1-6d0bf7cdc822.arena.site/',
+        url:'https://01a0cf8a-dd7f-726a-85a1-6d0bf7cdc822.arena.site/', embed:false,
         desc:'بين الكواكب تتلألأ علامات الاستفهام — نظّمي خريطتك النجمية بأسئلة WH الصحيحة.' },
       { id:'game-how-often',           title:'آلة العادات العجيبة',    tag:'How Often', cat:'grammar', icon:'clockgear',
         thumb:'assets/game-machine.jpg',
-        url:'https://01a0d36b-360c-7a4c-bd76-57bbbeb1592c.arena.site/',
+        url:'https://01a0d36b-360c-7a4c-bd76-57bbbeb1592c.arena.site/', embed:false,
         desc:'آلةٌ عجيبة تسأل: كم مرة؟ — أديري تروسها بظروف التكرار الصحيحة لتعمل من جديد.' },
       { id:'game-gerund-infinitive',   title:'مدينة الألعاب',          tag:'Gerund & Infinitive', cat:'grammar', icon:'wheel',
         thumb:'assets/game-city.jpg',
-        url:'https://01a0d237-d6d0-7d0a-8e1d-2e02f15400fc.arena.site/',
+        url:'https://01a0d237-d6d0-7d0a-8e1d-2e02f15400fc.arena.site/', embed:false,
         desc:'مدينة ألعابٍ كاملة تنتظرك — اختاري المصدر أو الصيغة المصدرية لتتحرك كل لعبة.' },
       { id:'game-present-progressive', title:'مغامرة أعماق البحر',     tag:'Present Progressive', cat:'grammar', icon:'sub',
         thumb:'assets/game-ocean.jpg',
-        url:'https://01a0cf28-0b25-7c62-a7fe-0e514dc0fb2c.arena.site/',
+        url:'https://01a0cf28-0b25-7c62-a7fe-0e514dc0fb2c.arena.site/', embed:false,
         desc:'انزلي إلى الأعماق حيث الأحداث تجري الآن — صِفي ما يحدث بزمن المضارع المستمر.' },
       { id:'game-subject-pronouns',    title:'رحلة تعليمية',           tag:'Subject Pronouns', cat:'grammar', icon:'bus',
         thumb:'assets/game-trip.jpg',
-        url:'https://01a0cd8e-332c-7d5b-9fdb-dc1a4983ffb1.arena.site/',
+        url:'https://01a0cd8e-332c-7d5b-9fdb-dc1a4983ffb1.arena.site/', embed:false,
         desc:'رحلة مدرسية ودّية — استبدلي الأسماء بضمائر الفاعل الصحيحة لتنطلق الحافلة في موعدها.' },
       { id:'game-past-simple',         title:'متحف الذكريات',          tag:'Past Simple', cat:'grammar', icon:'gallery',
         thumb:'assets/game-museum.svg',
-        url:'https://01a0cec9-5fe8-7770-992a-8f2331d27673.arena.site/',
+        url:'https://01a0cec9-5fe8-7770-992a-8f2331d27673.arena.site/', embed:false,
         desc:'متحفٌ تحرسه الذكريات — رتّبي اللحظات والمشاهد الماضية بقاعدة الماضي البسيط.' },
     ],
     vocabulary: [
       { id:'vocab-pick-1', title:'صورة وكلمة ١', tag:'Vocabulary 1 · Picture & Pick', cat:'vocabulary', icon:'pickframe',
         thumb:'assets/vocab-pick1.jpg',
-        url:'https://01a0d8d6-3497-77ed-8524-4a776b824745.arena.site/',
+        url:'https://01a0d8d6-3497-77ed-8524-4a776b824745.arena.site/', embed:false,
         desc:'انظري إلى الصورة واختاري الكلمة الإنجليزية الصحيحة — المحطة الأولى في رحلة مفرداتك.' },
       { id:'vocab-pick-2', title:'صورة وكلمة ٢', tag:'Vocabulary 2 · Picture & Pick', cat:'vocabulary', icon:'galleryspot',
         thumb:'assets/vocab-pick2.jpg',
-        url:'https://01a0d8f0-b3c6-7e59-8dbd-adfaf3aab041.arena.site/',
+        url:'https://01a0d8f0-b3c6-7e59-8dbd-adfaf3aab041.arena.site/', embed:false,
         desc:'تحدٍّ جديد بصورٍ جديدة — أربع كلمات أمامك، وواحدةٌ فقط تنتمي إلى الصورة.' },
       { id:'vocab-spell-3', title:'الحرف الناقص ٣', tag:'Vocabulary 3 · Picture & Pick', cat:'vocabulary', icon:'misstile',
         thumb:'assets/vocab-spell.jpg',
-        url:'https://01a0d92a-90a9-7ee4-8467-4b9cd63fa847.arena.site/',
+        url:'https://01a0d92a-90a9-7ee4-8467-4b9cd63fa847.arena.site/', embed:false,
         desc:'انظري، فكّري، وأكملي — ضعي الحرف الناقص في مكانه لتكتمل الكلمة وتُفتح النجوم.' },
     ],
     books: [
@@ -480,20 +480,15 @@ for (const activity of [...SB.data.games, ...SB.data.vocabulary]) {
 const gameAttempts = new Map();
 const gameAttemptKey = (origin, activityId) => origin + '::' + activityId;
 
-function markGameVisited(activityId) {                                 // visit counts toward progress
-  if (SB.stars(activityId) < 1) {
-    SB.grantStars(activityId, 1);
-    const card = document.querySelector(`.dest[data-id="${activityId}"]`);
-    if (card && card.querySelectorAll('.dst')[0]) card.querySelectorAll('.dst')[0].classList.add('on');
-  }
-}
+/* Opening a game is tracked (activity/opened) but is NEVER a completion: it
+   grants no star, unlocks no badge and adds nothing to the achievement count.
+   Only a genuine completion message from the game does (see the listener). */
 function trackGameAttempt(activity, kind, urlForOrigin) {
   const attempt = window.BridgeClient?.start(activity, kind);
   if (attempt?.owner && urlForOrigin) {
     try { gameAttempts.set(gameAttemptKey(new URL(urlForOrigin, location.href).origin, activity.id), attempt); }
     catch { /* malformed URL: open is still reported, completion cannot be matched back */ }
   }
-  markGameVisited(activity.id);
   return attempt;
 }
 function launchGameTab(activity, kind, href) {
@@ -501,6 +496,25 @@ function launchGameTab(activity, kind, href) {
   trackGameAttempt(activity, kind, target);
   if (target) window.open(target, '_blank');   // no 'noopener' feature: keeps window.opener for the bridge
 }
+/* Single entry point for every external game. Embeddable + verified games
+   open full-screen inside the viewer; all others keep the original new tab. */
+function launchGame(activity, kind, href) {
+  const viewer = window.GameViewer;
+  if (!viewer) return launchGameTab(activity, kind, href);
+  const mode = viewer.launchMode(activity, { testMode: viewer.isTestMode(location.search) });
+  if (mode === 'embed') return openPlayer(activity, kind, activity.url);
+  return launchGameTab(activity, kind, href);
+}
+/* Game completion is recorded per student for achievements (gameDone). The
+   star is the existing score display, derived from the real percentage. */
+function recordGameCompletion(activityId, score, maxScore) {
+  if (!SB.progress.gameDone || typeof SB.progress.gameDone !== 'object') SB.progress.gameDone = {};
+  SB.progress.gameDone[activityId] = { score, maxScore, at: Date.now() };
+}
+
+/* Passing threshold for a certificate — the same 80% rule the site applies to
+   its own certificates (SB.issueCertificate). */
+const CERT_MIN_SCORE = 80;
 
 window.addEventListener('message', event => {
   if (!event || !GAME_ORIGINS.has(event.origin)) return;               // untrusted origin: never trusted
@@ -509,22 +523,44 @@ window.addEventListener('message', event => {
   const activityId = String(data.activityId || '');
   const attempt = gameAttempts.get(gameAttemptKey(event.origin, activityId));
   if (!attempt) { console.warn('Bridge game message ignored: no tracked attempt for', activityId); return; }
+  // A game opened in the in-site viewer may only reply through THAT iframe.
+  if (attempt.frame && event.source !== attempt.frame.contentWindow) {
+    console.warn('Bridge game message ignored: source_mismatch', activityId);
+    return;
+  }
 
   if (data.type === 'completed') {
     const score = Number(data.score), maxScore = Number(data.maxScore);
-    if (!Number.isFinite(score) || !Number.isFinite(maxScore) || maxScore <= 0) {
+    if (!Number.isFinite(score) || !Number.isFinite(maxScore) || maxScore <= 0 || score < 0 || score > maxScore) {
       console.warn('Bridge game message rejected: invalid_score', activityId);
       return;
     }
-    window.BridgeClient?.result(attempt, score, maxScore);              // same, already-tested reporting path
     const pct = Math.round(score / maxScore * 100);
-    const stars = pct >= 80 ? 3 : (pct >= 60 ? 2 : (score > 0 ? 1 : 0));
-    SB.grantStars(activityId, stars);
-    const card = document.querySelector(`.dest[data-id="${activityId}"]`);
-    if (card) card.querySelectorAll('.dst').forEach((el, i) => { if (i < SB.stars(activityId)) el.classList.add('on'); });
+    const firstCompletion = !attempt.submitted;
+    window.BridgeClient?.result(attempt, score, maxScore);              // same, already-tested reporting path
+    if (firstCompletion && attempt.submitted) attempt.completedPct = pct; // gates certificates below
+    // The server record always goes to the student who launched the game. Local
+    // stars/achievements are written only while that same student is active here,
+    // so one child's completion never lands in another child's progress.
+    if (attempt.owner && attempt.owner.key === SB.currentKey) {
+      if (firstCompletion) recordGameCompletion(activityId, score, maxScore);
+      const stars = pct >= 80 ? 3 : (pct >= 60 ? 2 : (score > 0 ? 1 : 0));
+      SB.grantStars(activityId, stars);
+      const card = document.querySelector(`.dest[data-id="${activityId}"]`);
+      if (card) card.querySelectorAll('.dst').forEach((el, i) => { if (i < SB.stars(activityId)) el.classList.add('on'); });
+    }
   } else if (data.type === 'certificate') {
     const score = Number(data.score);
-    if (!Number.isFinite(score)) { console.warn('Bridge game message rejected: invalid_certificate_score', activityId); return; }
+    if (!Number.isFinite(score) || score < CERT_MIN_SCORE || score > 100) {
+      console.warn('Bridge game message rejected: invalid_certificate_score', activityId);
+      return;
+    }
+    // A certificate must follow a genuine, passing completion of this same
+    // attempt. A bare certificate message is never reported as an award.
+    if (!(attempt.completedPct >= CERT_MIN_SCORE)) {
+      console.warn('Bridge game message rejected: certificate_without_passing_completion', activityId);
+      return;
+    }
     // The owner captured at launch is passed explicitly so the certificate
     // can never land on a different student even if this tab's active
     // student changed while the game tab was open.
@@ -635,8 +671,8 @@ const RENDER = {
       host.addEventListener('click', e => {
         const b = e.target.closest('[data-play]'); if (!b) return;
         const g = SB.data.games.find(x => x.id === b.dataset.play); if (!g) return;
-        if (g.play) { openPlayer(g, 'game'); }                         // in-site responsive player
-        else if (g.url) { launchGameTab(g, 'game'); }                  // connected destination → new tab (opener kept)
+        if (g.play) { openPlayer(g, 'game', g.play); }                 // explicit in-site player URL
+        else if (g.url) { launchGame(g, 'game'); }                     // full-screen viewer or new tab (opener kept)
         else { toast(`وجهة «${g.title}» تُجهَّز للانطلاق — رابط اللعبة الرسمي يصل هنا قريبًا`); }
       });
     }
@@ -657,8 +693,8 @@ const RENDER = {
         if (e.target.closest('.dest-link')) return;
         const b = e.target.closest('[data-play]'); if (!b) return;
         const g = SB.data.vocabulary.find(x => x.id === b.dataset.play); if (!g) return;
-        if (g.play) { openPlayer(g, 'vocabulary'); }
-        else if (g.url) { launchGameTab(g, 'vocabulary'); }
+        if (g.play) { openPlayer(g, 'vocabulary', g.play); }
+        else if (g.url) { launchGame(g, 'vocabulary'); }
         else { toast(`وجهة «${g.title}» تُجهَّز للانطلاق — قريبًا`); }
       });
     }
@@ -733,9 +769,10 @@ const RENDER = {
     const stationTried  = SB.stations.some(st => (scores[st.id] || 0) > 0);
     const stationPassed = SB.stations.some(st => SB.stars(st.id) >= 3);
     const allStations   = SB.stations.every(st => SB.stars(st.id) >= 3);
-    const anyActivity   = SB.progress.done.length > 0 || Object.keys(SB.progress.gameStars || {}).length > 0;
+    const doneGames     = SB.progress.gameDone || {};
+    const anyActivity   = SB.progress.done.length > 0 || Object.keys(doneGames).length > 0;
     const readABook     = SB.progress.done.some(t => t.startsWith('book-'));
-    const vocabSeen = Object.keys(SB.progress.gameStars || {}).some(id => id.startsWith('vocab-'));
+    const vocabSeen = Object.keys(doneGames).some(id => id.startsWith('vocab-'));
     const allBooks  = SB.data.books.every(b => SB.progress.done.includes('book-' + b.id));
     const unlocked = new Set();
     if (SB.pass)       { unlocked.add('first-cross'); unlocked.add('explore'); }
@@ -794,7 +831,7 @@ function refreshProgress() {
   const stars = totalStars();
   const stDone = stationsPassed();
   const bDone = booksDone();
-  const gamesSeen = Object.keys(SB.progress.gameStars || {})
+  const gamesSeen = Object.keys(SB.progress.gameDone || {})
     .filter(id => id.startsWith('game-') || id.startsWith('vocab-')).length;
 
   /* overall learning progress: assessment stations + finished stories + earned badges */
@@ -1205,81 +1242,18 @@ applyPassUI();
 /* expose for the official content drop-in */
 window.SB = SB;
 
-/* ============ in-site Game Player (same-origin, mobile-first) ============ */
-let _player = null, _scrollY = 0;
-
-function ensurePlayer() {
-  if (_player) return _player;
-  const wrap = document.createElement('div');
-  wrap.id = 'gamePlayer';
-  wrap.setAttribute('role', 'dialog');
-  wrap.setAttribute('aria-modal', 'true');
-  wrap.innerHTML = `
-    <div class="gplayer-bar">
-      <button type="button" class="gp-back" id="gpBack">
-        <svg viewBox="0 0 48 48" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10l14 14-14 14"/></svg>
-        <span>عودة إلى الألعاب</span>
-      </button>
-      <span class="gp-title" id="gpTitle"></span>
-      <span class="gp-actions">
-        <a class="gp-ext" id="gpExt" href="#" target="_blank" rel="noopener" aria-label="فتح اللعبة في تبويب جديد">
-          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10h18v18M38 10L18 30M14 14H8v24h24v-6"/></svg>
-        </a>
-        <button type="button" class="gp-close" id="gpClose" aria-label="إغلاق اللعبة">
-          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"><path d="M13 13l22 22M35 13L13 35"/></svg>
-        </button>
-      </span>
-    </div>
-    <div class="gp-loader" id="gpLoader" aria-hidden="true">
-      <span class="gp-ring"></span><b id="gpLoadingText"></b>
-    </div>
-    <iframe class="gp-frame" id="gpFrame" title="نافذة اللعبة" allow="fullscreen; autoplay; gamepad" allowfullscreen referrerpolicy="no-referrer"></iframe>`;
-  document.body.appendChild(wrap);
-  $('#gpBack', wrap).addEventListener('click', closePlayer);
-  $('#gpClose', wrap).addEventListener('click', closePlayer);
-  window.addEventListener('keydown', e => { if (e.key === 'Escape' && _player.classList.contains('open')) closePlayer(); });
-  _player = wrap;
-  return wrap;
-}
-
-function openPlayer(g, kind = 'game') {
-  if (!g.play) return;
-  const wrap = ensurePlayer();
-  $('#gpTitle').textContent = g.title;
-  const ext = $('#gpExt');
-  if (g.launchUrl) { ext.href = g.launchUrl; ext.hidden = false; } else { ext.hidden = true; }
-  $('#gpLoadingText').textContent = `جاري فتح «${g.title}»…`;
-  wrap.classList.add('open', 'loading');
-  /* freeze the page in place — pixel-exact restore on close */
-  _scrollY = window.scrollY;
-  document.documentElement.classList.add('no-scroll');
-  document.body.style.position = 'fixed';
-  document.body.style.top = (-_scrollY) + 'px';
-  document.body.style.left = '0';
-  document.body.style.right = '0';
-  const frame = $('#gpFrame');
-  frame.onload = () => wrap.classList.remove('loading');
-  frame.src = g.play;
-  /* وجهة تمت زيارتها → أول نجمة في نظام التقدّم، وتُسجَّل محاولة اللعبة
-     لتتبُّع رسائل الإنجاز/النتيجة/الشهادة القادمة من نفس الـ iframe. */
-  trackGameAttempt(g, kind, g.play);
-}
-
-function closePlayer() {
-  if (!_player) return;
-  const frame = $('#gpFrame');
-  frame.onload = null;
-  frame.src = 'about:blank';
-  _player.classList.remove('open', 'loading');
-  document.documentElement.classList.remove('no-scroll');
-  document.body.style.position = '';
-  document.body.style.top = '';
-  document.body.style.left = '';
-  document.body.style.right = '';
-  const restore = () => { window.scrollTo(0, _scrollY); window.scrollTo({ top: _scrollY, behavior: 'instant' }); };
-  restore();
-  requestAnimationFrame(restore);
-  setTimeout(restore, 60);
+/* ============ in-site full-screen Game Viewer (see game-viewer.js) ============
+   openPlayer keeps its name and signature for existing callers. The viewer
+   owns the overlay; this layer owns the attempt: it is tracked with the
+   student captured at launch, and replies are bound to the viewer's iframe. */
+function openPlayer(g, kind = 'game', url = g.play || g.url) {
+  const viewer = window.GameViewer;
+  if (!viewer) return launchGameTab(g, kind, url);
+  const handle = viewer.open(g, { url, onExternal: () => launchGameTab(g, kind) });
+  if (!handle) return launchGameTab(g, kind, url);     // not an https URL: original behaviour
+  const attempt = trackGameAttempt(g, kind, handle.url);
+  if (attempt) attempt.frame = handle.frame;            // replies must come from this iframe
+  return attempt;
 }
 
 /* ====================== journey autoplay (جولة تلقائية هادئة) ====================== */
@@ -2119,9 +2093,8 @@ document.addEventListener('click', e => {
   // a postMessage reply since we do not control that navigation.
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
     window.BridgeClient?.start(activity, kind);
-    markGameVisited(activity.id);
     return;
   }
   e.preventDefault();
-  launchGameTab(activity, kind, link.href);
+  launchGame(activity, kind, link.href);
 });
