@@ -75,6 +75,7 @@ function boot(shared = {}, fetchOverride = null) {
     removeEventListener(){},
   };
   vm.runInNewContext(fs.readFileSync('bridge-client.js', 'utf8'), ctx, { filename: 'bridge-client.js' });
+  vm.runInNewContext(fs.readFileSync('game-viewer.js', 'utf8'), ctx, { filename: 'game-viewer.js' });
   vm.runInNewContext(fs.readFileSync('app.js', 'utf8'), ctx, { filename: 'app.js' });
   return { ctx, SB: ctx.SB, logs, calls: ctx.calls, docListeners, winListeners, opens };
 }
@@ -178,7 +179,7 @@ test('no duplicate student is created by completion/certificate messages', async
   clickDestLink(docListeners, 'game-comparisons', game.url);
   await settle();
 
-  fireMessage(winListeners, { origin, data: { source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'completed', score: 7, maxScore: 10 } });
+  fireMessage(winListeners, { origin, data: { source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'completed', score: 9, maxScore: 10 } });
   fireMessage(winListeners, { origin, data: { source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'certificate', score: 88 } });
   await settle();
 
@@ -204,7 +205,8 @@ test('a completion message cannot attach to a different student, even if the act
   ctx.BridgeClient.setIdentity(SB.pass, { force: true });
   await settle();
 
-  fireMessage(winListeners, { origin, data: { source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'completed', score: 6, maxScore: 10 } });
+  // 9/10 is a passing completion: a certificate must follow one (see tests/game-viewer.test.cjs).
+  fireMessage(winListeners, { origin, data: { source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'completed', score: 9, maxScore: 10 } });
   fireMessage(winListeners, { origin, data: { source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'certificate', score: 80 } });
   await settle();
 

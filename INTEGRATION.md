@@ -104,6 +104,67 @@ outside this repository's control. If it does not yet, this bridge is the receiv
 it possible the moment the game's own code sends it — no further change would be needed on this
 side. No backend change is required; the existing `activity/result` contract is reused as-is.
 
+## Full-screen game viewer (branch `arena/44b6bed9-schools-bridge`)
+
+Not yet merged. Production (`main`, GitHub Pages) is unchanged by this branch.
+
+**What it does**
+
+- `game-viewer.js` (new, loaded before `app.js`) provides `window.GameViewer`: a reusable full-screen overlay. A slim bar holds a clear **Back to Jisr Almadaris** control (Arabic + English on larger screens), an external-tab button, and a frame that fills the rest of the screen (dynamic viewport units, safe-area aware, no borders, no site menus). Back, Escape, and the browser's own game controls close or stop it; closing restores the exact scroll position and stops the game (`about:blank`).
+- `app.js` `launchGame()` is the single entry point for every catalog game and vocabulary activity. It opens the viewer only when `GameViewer.launchMode()` returns `embed`; otherwise it keeps the original new-tab launch byte-for-byte (same URL, `target="_blank"`, same click interception and modified-click behaviour).
+- **Default: every catalog entry is `embed:false`.** The 13 games (10 grammar games, 3 vocabulary activities) therefore keep opening in their own tab for every student. A game is switched to the viewer only by setting its `embed: true` after it has been verified (see below). Embedding is never forced on an unverified game.
+- Verification switch: `?gameViewer=embed` on the site URL opens **every** game in the viewer for that visit only. It exists so the owner can test each game in a real browser before any `embed: true` is set. It does not change what students see by default.
+
+**Reporting rules (changed in this branch)**
+
+- Opening a game (or the viewer) is still reported as `activity/opened`. It is **never** a completion: it grants no star, unlocks no `learn` / `vocab-star` badge, and does not count as an activity. Previously a visit granted one local star and could unlock those badges, which reported them to the Teacher Control Center as achievements. This is the one intended change to existing local scoring; please confirm it.
+- A completion counts only when the game sends the `completed` message (below). Its stars and the achievement count come from that message only (`SB.progress.gameDone`).
+- A `certificate` message is accepted only if this same attempt already sent a passing completion (≥ 80%, the same 80% rule the site uses for its own certificates) and the certificate score is 80–100. Otherwise it is rejected and logged (`certificate_without_passing_completion`, `invalid_certificate_score`), and nothing is reported.
+- When a game runs in the viewer, its replies are accepted only from the launched iframe (`event.source === iframe.contentWindow`). A message from any other window is ignored (`source_mismatch`).
+- Completion scores must be finite, `maxScore > 0`, and `0 ≤ score ≤ maxScore`.
+- Nothing is shown to students about reporting: no toast, no visible text. Diagnostics are `console.warn` only.
+
+**What a game must send** (unchanged contract; new in-viewer case noted)
+
+```js
+// Embedded in the viewer:  parent.postMessage(msg, 'https://jisr-almadaris.github.io')
+// Opened in a new tab:     window.opener.postMessage(msg, 'https://jisr-almadaris.github.io')
+{ source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'completed', score, maxScore }
+{ source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'certificate', score, title? }
+```
+Send `completed` first, and only when the student has genuinely finished. Send `certificate` only after a passing completion.
+
+**How to verify a game and enable it** (owner, in a normal browser on the production origin)
+
+1. Open the site with `?gameViewer=embed` and register a test student.
+2. Open the game. Confirm it plays inside the viewer, fills the screen, sounds and animations work, and the Back button returns to the site.
+3. Finish the game. Confirm the stars on the card and the Teacher Control Center record for that student (score and, if earned, the certificate).
+4. If the game refuses to display (the browser shows a refusal inside the frame), **do not enable it**. Keep `embed:false`; the external tab remains the correct experience.
+5. Only for games that pass 2–3, change that catalog entry to `embed: true` in `app.js`.
+
+**Tests**
+
+```sh
+node --check game-viewer.js && node --check app.js
+node --test tests/*.test.cjs            # 72 tests: bridge, students, game bridge, game viewer
+SITE_URL=http://localhost:8080 CHROME_PATH=/path/to/chrome PUPPETEER_MODULE=puppeteer-core \
+  node tests/e2e/game-viewer.e2e.mjs    # real headless browser: 50 checks, mobile + desktop
+```
+The browser test serves a scripted stand-in for each game through request interception on the real arena.site URLs and intercepts the Teacher API, so it writes nothing to any backend. It is not part of `node --test` (it needs a Chrome binary and `puppeteer-core`).
+
+**Limits of this change**
+
+- The 13 games are hosted on Arena (`*.arena.site`), outside this repository. This environment could not reach them, so **whether any game can be framed was not verified here**. The repository's earlier `server.py` note says Arena games send `X-Frame-Options: SAMEORIGIN`; if that is true for all of them, no game can be embedded without a change on the Arena side, and all 13 stay in external tabs.
+- Embedded games are third-party to this site. Browsers may partition or block their storage (cookies, localStorage). A game that keeps its own progress across visits may behave differently inside the viewer, so check this during verification.
+- The bridge is receive-only. No inspected game is known to send the contract messages; this could not be checked from here (the page-fetch tool returns rendered text, not game source).
+
+**Rollback**
+
+- The branch is not merged. To abandon it, close the PR without merging. `main` and GitHub Pages are unaffected.
+- To revert after merge: `git revert <merge-commit>` on `main` (or revert the feature commit), push, and GitHub Pages republishes the previous version. No Supabase or backend records are touched by this change.
+- Partial rollback without a revert: set every `embed:` flag to `false` in `app.js`. All games return to their original new-tab launch. Visit-star removal and certificate gating are not undone by this; revert the commit for those.
+- Local progress is namespaced per student and nothing is deleted. Existing visit stars already stored on a device remain as they are.
+
 ## Limits that must not be misrepresented
 
 - External game sources are not in this repository. The game-reporting bridge above covers the
@@ -126,7 +187,7 @@ node --check app.js
 node --test tests/bridge-client.test.cjs   # 30 tests — public API contract
 node --test tests/app-students.test.cjs    #  6 tests — per-student site storage
 node --test tests/game-bridge.test.cjs     # 12 tests — shared cross-origin game reporting bridge
-node --test tests/*.test.cjs               # 48 tests — full suite
+node --test tests/*.test.cjs               # 72 tests — full suite (incl. game viewer)
 ```
 
 Tests mock the supplied HTTP contract, not the production database/dashboard. Cover payloads/auth, idempotency, token recovery, identity capture, offline replay/reload, retries, rate limiting, disabled API, storage failure, honest open-only tracking, independent multi-student records, shared-device switching, append-only rosters, cross-tab merge, per-student certificate/badge reporting, and (new) the shared game-reporting bridge: open uses the correct student, completion/score/certificate report for that same student, no duplicate student is ever created, a result cannot attach to a different student even if the active student changes mid-flight, an untracked/unknown-origin message is ignored, registration-only metrics and badges/onboarding stay unaffected, reporting survives both the new-tab and the in-site iframe-player launch context, API errors are logged rather than swallowed, and the fix is shared across games (proven with a second, unrelated game).
