@@ -471,16 +471,21 @@ const GAME_ORIGINS = new Set();
 for (const activity of [...SB.data.games, ...SB.data.vocabulary]) {
   for (const link of [activity.url, activity.play, activity.launchUrl]) {
     if (!link) continue;
-    try { GAME_ORIGINS.add(new URL(link, location.href).origin); } catch { /* malformed catalog entry: ignore */ }
+    try { GAME_ORIGINS.add(new URL(link, location.href).origin); } catch { /* invalid catalog URL */ }
   }
 }
-// One in-flight attempt per (origin, activity) for THIS tab, keyed at launch
-// time. A student switch, reload-elsewhere, or a second registration later
-// in the same tab cannot repoint an attempt that is already in flight.
 const gameAttempts = new Map();
 const gameAttemptKey = (origin, activityId) => origin + '::' + activityId;
-
-function markGameVisited(activityId) {                                 // visit counts toward progress
+const SESSION_PREFIX = 'schools-bridge-session-v1::';
+function newGameSessionId() {
+  try {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    const bytes = new Uint8Array(20);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  } catch { return null; }
+}
+function markGameVisited(activityId) {
   if (SB.stars(activityId) < 1) {
     SB.grantStars(activityId, 1);
     const card = document.querySelector(`.dest[data-id="${activityId}"]`);
@@ -490,62 +495,99 @@ function markGameVisited(activityId) {                                 // visit 
 function trackGameAttempt(activity, kind, urlForOrigin) {
   const attempt = window.BridgeClient?.start(activity, kind);
   if (attempt?.owner && urlForOrigin) {
-    try { gameAttempts.set(gameAttemptKey(new URL(urlForOrigin, location.href).origin, activity.id), attempt); }
-    catch { /* malformed URL: open is still reported, completion cannot be matched back */ }
+    try {
+      const key = gameAttemptKey(new URL(urlForOrigin, location.href).origin, activity.id);
+      const previous = gameAttempts.get(key);
+      if (previous?.sessionChannel) previous.sessionChannel.close();
+      gameAttempts.set(key, attempt);
+    } catch { /* unsupported destination */ }
   }
   markGameVisited(activity.id);
   return attempt;
 }
-function launchGameTab(activity, kind, href) {
-  const target = href || activity.url;
-  trackGameAttempt(activity, kind, target);
-  if (target) {
-    const opened = window.open(target, '_blank');
-    if (opened) {
-      try { gameAttempts.get(gameAttemptKey(new URL(target, location.href).origin, activity.id)).gameWindow = opened; }
-      catch { /* open was attempted even if the platform blocks the popup */ }
-    }
-  }
-}
-
-window.addEventListener('message', event => {
-  if (!event || !GAME_ORIGINS.has(event.origin)) return;               // untrusted origin: never trusted
-  const data = event.data;
+function handleGameReport(data, attempt, origin, route, replyTarget) {
   if (!data || typeof data !== 'object' || data.source !== 'schools-bridge-game') return;
-  const activityId = String(data.activityId || '');
-  const attempt = gameAttempts.get(gameAttemptKey(event.origin, activityId));
-  if (!attempt) { console.warn('Bridge game message ignored: no tracked attempt for', activityId); return; }
+  if (!attempt?.owner || String(data.activityId || '') !== attempt.activity.id) return;
+  if (gameAttempts.get(gameAttemptKey(origin, attempt.activity.id)) !== attempt) return;
+  if (route === 'channel' && data.sessionId !== attempt.sessionId) return;
   if (data.type === 'ready') {
-    if (attempt.gameWindow && event.source !== attempt.gameWindow) return;
-    if (attempt.owner?.name && attempt.owner?.school && event.source?.postMessage) {
-      event.source.postMessage({ source: 'schools-bridge-host', type: 'identity', activityId,
-        name: attempt.owner.name, school: attempt.owner.school }, event.origin);
-    }
+    const message = {
+      source: 'schools-bridge-host', type: 'identity', activityId: attempt.activity.id,
+      name: attempt.owner.name, school: attempt.owner.school,
+      ...(attempt.sessionId ? { sessionId: attempt.sessionId } : {}),
+    };
+    try {
+      if (route === 'channel') replyTarget.postMessage(message);
+      else replyTarget?.postMessage(message, origin);
+    } catch (error) { console.warn('Game identity reply failed', error); }
     return;
   }
-
   if (data.type === 'completed') {
+    if (attempt.gameCompletionReceived) return;
     const score = Number(data.score), maxScore = Number(data.maxScore);
-    if (!Number.isFinite(score) || !Number.isFinite(maxScore) || maxScore <= 0) {
-      console.warn('Bridge game message rejected: invalid_score', activityId);
-      return;
+    if (!Number.isFinite(score) || !Number.isFinite(maxScore) || maxScore <= 0 || score < 0 || score > maxScore) {
+      console.warn('Bridge game message rejected: invalid_score', attempt.activity.id); return;
     }
-    window.BridgeClient?.result(attempt, score, maxScore);              // same, already-tested reporting path
+    attempt.gameCompletionReceived = true;
+    window.BridgeClient?.result(attempt, score, maxScore);
     const pct = Math.round(score / maxScore * 100);
     const stars = pct >= 80 ? 3 : (pct >= 60 ? 2 : (score > 0 ? 1 : 0));
-    SB.grantStars(activityId, stars);
-    const card = document.querySelector(`.dest[data-id="${activityId}"]`);
-    if (card) card.querySelectorAll('.dst').forEach((el, i) => { if (i < SB.stars(activityId)) el.classList.add('on'); });
+    SB.grantStars(attempt.activity.id, stars);
+    const card = document.querySelector(`.dest[data-id="${attempt.activity.id}"]`);
+    if (card) card.querySelectorAll('.dst').forEach((el, i) => {
+      if (i < SB.stars(attempt.activity.id)) el.classList.add('on');
+    });
   } else if (data.type === 'certificate') {
+    if (attempt.gameCertificateReceived) return;
     const score = Number(data.score);
-    if (!Number.isFinite(score)) { console.warn('Bridge game message rejected: invalid_certificate_score', activityId); return; }
-    // The owner captured at launch is passed explicitly so the certificate
-    // can never land on a different student even if this tab's active
-    // student changed while the game tab was open.
-    window.BridgeClient?.certificate({ key: activityId, title: data.title || attempt.activity.title, score }, attempt.owner);
+    if (!Number.isFinite(score) || score < 0 || score > 100) {
+      console.warn('Bridge game message rejected: invalid_certificate_score', attempt.activity.id); return;
+    }
+    attempt.gameCertificateReceived = true;
+    window.BridgeClient?.certificate({
+      key: attempt.activity.id, title: data.title || attempt.activity.title, score,
+    }, attempt.owner);
   } else {
     console.warn('Bridge game message ignored: unknown_type', String(data.type || ''));
   }
+}
+function launchGameTab(activity, kind, href) {
+  const target = href || activity.url;
+  const attempt = trackGameAttempt(activity, kind, target);
+  if (!target) return;
+  let destination = target;
+  if (attempt?.owner && 'BroadcastChannel' in window) {
+    try {
+      const url = new URL(target, location.href);
+      // The fallback works only when the game and the bridge are on the SAME origin.
+      // Never send student identity to a cross-origin BroadcastChannel.
+      if (url.origin === location.origin) {
+        const sessionId = newGameSessionId();
+        if (sessionId) {
+          const channel = new BroadcastChannel(SESSION_PREFIX + sessionId);
+          attempt.sessionId = sessionId;
+          attempt.sessionChannel = channel;
+          channel.onmessage = event => handleGameReport(event.data, attempt, url.origin, 'channel', channel);
+          const fragment = new URLSearchParams(url.hash.replace(/^#/, ''));
+          fragment.set('sb_session', sessionId);
+          url.hash = fragment.toString();
+          destination = url.href;
+        }
+      }
+    } catch (error) { console.warn('Game channel unavailable; using window messaging', error); }
+  }
+  const opened = window.open(destination, '_blank');
+  if (attempt && opened) attempt.gameWindow = opened;
+}
+window.addEventListener('message', event => {
+  if (!event || !GAME_ORIGINS.has(event.origin)) return;
+  const data = event.data;
+  if (!data || data.source !== 'schools-bridge-game') return;
+  const activityId = String(data.activityId || '');
+  const attempt = gameAttempts.get(gameAttemptKey(event.origin, activityId));
+  if (!attempt) { console.warn('Bridge game message ignored: no tracked attempt for', activityId); return; }
+  if (attempt.gameWindow && event.source !== attempt.gameWindow) return;
+  handleGameReport(data, attempt, event.origin, 'opener', event.source);
 });
 
 function destCard(g) {
