@@ -37,39 +37,39 @@ const SB = {
         desc:'جُزُرٌ تكبر خطوةً بعد خطوة — أتقني المقارنات وصيغة التفضيل لتصلي إلى القمة الذهبية.' },
       { id:'game-possessives',         title:'لغز الممتلكات المفقودة', tag:'Possessive Pronouns', cat:'grammar', icon:'keepsake',
         thumb:'assets/game-possessive.svg',
-        url:'https://01a0cdea-8a42-7fa6-92bb-2afbd61f567b.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/game-possessives/',
         desc:'جزيرةٌ فقدت متعلقاتها — أعيدي كلَّ غرضٍ إلى صاحبه بضمائر الملكية الصحيحة.' },
       { id:'game-conjunctions',        title:'الفندق السحري',          tag:'Conjunctions', cat:'grammar', icon:'chain',
         thumb:'assets/game-hotel.jpg',
-        url:'https://01a0d3b3-4db8-735d-8140-4ef645996e9b.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/game-conjunctions/',
         desc:'أبواب الفندق السحري لا تنفتح إلا بحلقات الوصل — اربطي الجمل بأدوات الربط المناسبة.' },
       { id:'game-present-simple',      title:'رحلتي',                  tag:'Present Simple', cat:'grammar', icon:'route',
         thumb:'assets/game-journey.jpg',
-        url:'https://01a0ceba-9a08-7f62-a83d-4f0c4afacf84.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/game-present-simple/',
         desc:'يومُكِ الجميل يتكرر على الطريق — ثبّتي قاعدة المضارع البسيط لتكتمل رحلتك اليومية.' },
       { id:'game-wh-questions',        title:'الفضاء',                 tag:'WH Questions', cat:'grammar', icon:'planet',
         thumb:'assets/game-space.jpg',
-        url:'https://01a0cf8a-dd7f-726a-85a1-6d0bf7cdc822.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/game-wh-questions/',
         desc:'بين الكواكب تتلألأ علامات الاستفهام — نظّمي خريطتك النجمية بأسئلة WH الصحيحة.' },
       { id:'game-how-often',           title:'آلة العادات العجيبة',    tag:'How Often', cat:'grammar', icon:'clockgear',
         thumb:'assets/game-machine.jpg',
-        url:'https://01a0d36b-360c-7a4c-bd76-57bbbeb1592c.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/game-how-often/',
         desc:'آلةٌ عجيبة تسأل: كم مرة؟ — أديري تروسها بظروف التكرار الصحيحة لتعمل من جديد.' },
       { id:'game-gerund-infinitive',   title:'مدينة الألعاب',          tag:'Gerund & Infinitive', cat:'grammar', icon:'wheel',
         thumb:'assets/game-city.jpg',
-        url:'https://01a0d237-d6d0-7d0a-8e1d-2e02f15400fc.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/game-gerund-infinitive/',
         desc:'مدينة ألعابٍ كاملة تنتظرك — اختاري المصدر أو الصيغة المصدرية لتتحرك كل لعبة.' },
       { id:'game-present-progressive', title:'مغامرة أعماق البحر',     tag:'Present Progressive', cat:'grammar', icon:'sub',
         thumb:'assets/game-ocean.jpg',
-        url:'https://01a0cf28-0b25-7c62-a7fe-0e514dc0fb2c.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/game-present-progressive/',
         desc:'انزلي إلى الأعماق حيث الأحداث تجري الآن — صِفي ما يحدث بزمن المضارع المستمر.' },
       { id:'game-subject-pronouns',    title:'رحلة تعليمية',           tag:'Subject Pronouns', cat:'grammar', icon:'bus',
         thumb:'assets/game-trip.jpg',
-        url:'https://01a0cd8e-332c-7d5b-9fdb-dc1a4983ffb1.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/game-subject-pronouns/',
         desc:'رحلة مدرسية ودّية — استبدلي الأسماء بضمائر الفاعل الصحيحة لتنطلق الحافلة في موعدها.' },
       { id:'game-past-simple',         title:'متحف الذكريات',          tag:'Past Simple', cat:'grammar', icon:'gallery',
         thumb:'assets/game-museum.svg',
-        url:'https://01a0cec9-5fe8-7770-992a-8f2331d27673.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/game-past-simple/',
         desc:'متحفٌ تحرسه الذكريات — رتّبي اللحظات والمشاهد الماضية بقاعدة الماضي البسيط.' },
     ],
     vocabulary: [
@@ -499,7 +499,13 @@ function trackGameAttempt(activity, kind, urlForOrigin) {
 function launchGameTab(activity, kind, href) {
   const target = href || activity.url;
   trackGameAttempt(activity, kind, target);
-  if (target) window.open(target, '_blank');   // no 'noopener' feature: keeps window.opener for the bridge
+  if (target) {
+    const opened = window.open(target, '_blank');
+    if (opened) {
+      try { gameAttempts.get(gameAttemptKey(new URL(target, location.href).origin, activity.id)).gameWindow = opened; }
+      catch { /* open was attempted even if the platform blocks the popup */ }
+    }
+  }
 }
 
 window.addEventListener('message', event => {
@@ -509,6 +515,14 @@ window.addEventListener('message', event => {
   const activityId = String(data.activityId || '');
   const attempt = gameAttempts.get(gameAttemptKey(event.origin, activityId));
   if (!attempt) { console.warn('Bridge game message ignored: no tracked attempt for', activityId); return; }
+  if (data.type === 'ready') {
+    if (attempt.gameWindow && event.source !== attempt.gameWindow) return;
+    if (attempt.owner?.name && attempt.owner?.school && event.source?.postMessage) {
+      event.source.postMessage({ source: 'schools-bridge-host', type: 'identity', activityId,
+        name: attempt.owner.name, school: attempt.owner.school }, event.origin);
+    }
+    return;
+  }
 
   if (data.type === 'completed') {
     const score = Number(data.score), maxScore = Number(data.maxScore);
