@@ -32,7 +32,7 @@ const SB = {
     games: [
       { id:'game-comparisons',         title:'جزر المقارنات',          tag:'Comparative & Superlatives', cat:'grammar', icon:'islands',
         thumb:'assets/game-islands.jpg',
-        url:'https://01a0cd6d-83ae-7de8-9b94-b5f56306d66f.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/game-comarisons/',
         play:null, launchUrl:null,
         desc:'جُزُرٌ تكبر خطوةً بعد خطوة — أتقني المقارنات وصيغة التفضيل لتصلي إلى القمة الذهبية.' },
       { id:'game-possessives',         title:'لغز الممتلكات المفقودة', tag:'Possessive Pronouns', cat:'grammar', icon:'keepsake',
