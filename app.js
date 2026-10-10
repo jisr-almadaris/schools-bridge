@@ -75,7 +75,7 @@ const SB = {
     vocabulary: [
       { id:'vocab-pick-1', title:'صورة وكلمة ١', tag:'Vocabulary 1 · Picture & Pick', cat:'vocabulary', icon:'pickframe',
         thumb:'assets/vocab-pick1.jpg',
-        url:'https://jisr-almadaris.github.io/schools-bridge-games/vocab-pick-1/
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/vocab-pick-1/',
         desc:'انظري إلى الصورة واختاري الكلمة الإنجليزية الصحيحة — المحطة الأولى في رحلة مفرداتك.' },
       { id:'vocab-pick-2', title:'صورة وكلمة ٢', tag:'Vocabulary 2 · Picture & Pick', cat:'vocabulary', icon:'galleryspot',
         thumb:'assets/vocab-pick2.jpg',
