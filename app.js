@@ -75,15 +75,15 @@ const SB = {
     vocabulary: [
       { id:'vocab-pick-1', title:'صورة وكلمة ١', tag:'Vocabulary 1 · Picture & Pick', cat:'vocabulary', icon:'pickframe',
         thumb:'assets/vocab-pick1.jpg',
-        url:'https://01a0d8d6-3497-77ed-8524-4a776b824745.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/vocab-pick-1/
         desc:'انظري إلى الصورة واختاري الكلمة الإنجليزية الصحيحة — المحطة الأولى في رحلة مفرداتك.' },
       { id:'vocab-pick-2', title:'صورة وكلمة ٢', tag:'Vocabulary 2 · Picture & Pick', cat:'vocabulary', icon:'galleryspot',
         thumb:'assets/vocab-pick2.jpg',
-        url:'https://01a0d8f0-b3c6-7e59-8dbd-adfaf3aab041.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/vocab-pick-2/',
         desc:'تحدٍّ جديد بصورٍ جديدة — أربع كلمات أمامك، وواحدةٌ فقط تنتمي إلى الصورة.' },
       { id:'vocab-spell-3', title:'الحرف الناقص ٣', tag:'Vocabulary 3 · Picture & Pick', cat:'vocabulary', icon:'misstile',
         thumb:'assets/vocab-spell.jpg',
-        url:'https://01a0d92a-90a9-7ee4-8467-4b9cd63fa847.arena.site/',
+        url:'https://jisr-almadaris.github.io/schools-bridge-games/vocab-spell-3/',
         desc:'انظري، فكّري، وأكملي — ضعي الحرف الناقص في مكانه لتكتمل الكلمة وتُفتح النجوم.' },
     ],
     books: [
