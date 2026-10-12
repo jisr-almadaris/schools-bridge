@@ -2,15 +2,12 @@
 (() => {
   'use strict';
 
-  // This is the only production API origin used by the student site.
   const API = 'https://schools-bridge-admin.onrender.com/api/public/';
   const uid = () => globalThis.crypto?.randomUUID?.() ||
     'ev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
   const slug = value => String(value == null ? '' : value)
     .replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 60) || 'x';
   const eventScope = owner => {
-    // A deterministic, non-personal scope prevents two students who earn the
-    // same award from sharing one idempotency key on a global event store.
     let hash = 2166136261;
     for (const char of String(owner?.visitor_id || '')) {
       hash ^= char.charCodeAt(0);
@@ -25,12 +22,6 @@
     try { window[store].setItem(key, JSON.stringify(value)); } catch { /* local-only fallback */ }
   };
 
-  /* ------------------------------------------------------------------
-     Shared-device student roster
-     One append-only entry per distinct name + school pair. Each entry gets
-     its own visitor_id; a second child on the same device can never take over
-     the first child's server identity or history.
-     ------------------------------------------------------------------ */
   const ROSTER_KEY = 'bridge_roster';
   const TAB_KEY = 'bridge_identity';
   const QUEUE_KEY = 'bridge_queue';
@@ -54,7 +45,6 @@
 
   let roster = cleanRoster(read('localStorage', ROSTER_KEY, []));
   const saveRoster = () => {
-    // Merge a concurrent tab's new records before writing; nothing is removed.
     for (const entry of cleanRoster(read('localStorage', ROSTER_KEY, []))) {
       const mine = roster.find(candidate => candidate.key === entry.key);
       if (!mine) roster.push(entry);
@@ -82,6 +72,7 @@
   }
 
   let busy = false, timer;
+  let consecutiveFailures = 0;
   const persist = () => {
     write('sessionStorage', TAB_KEY, current ? { key: current.key } : null);
     write('sessionStorage', QUEUE_KEY, queue);
@@ -92,7 +83,6 @@
   const logFailure = (kind, item, error) => {
     const status = Number.isFinite(error?.status) ? error.status : null;
     const code = error?.name === 'AbortError' ? 'timeout' : safeCode(error?.code || error?.message);
-    // Do not include a payload, student details, visitor id, or bearer token.
     console.warn(`Bridge submission ${kind}:`, item.path, status, code);
   };
   const settle = (item, error) => {
@@ -105,7 +95,9 @@
 
   async function call(path, body, token) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
+    // Render cold starts can exceed 20 seconds. Avoid aborting otherwise-valid
+    // student submissions while the service is waking up.
+    const timeout = setTimeout(() => controller.abort(), 90000);
     try {
       const response = await fetch(API + path, {
         method: 'POST', credentials: 'omit', cache: 'no-store', signal: controller.signal,
@@ -135,7 +127,6 @@
     if (!data.student_id || !data.submission_token) {
       throw Object.assign(new Error('invalid_identity_response'), { code: 'invalid_identity_response' });
     }
-    // An old attempt must never be replayed as a different server student.
     if (owner.student_id && owner.student_id !== data.student_id) {
       throw Object.assign(new Error('identity_changed'), { status: 400, code: 'identity_changed' });
     }
@@ -149,12 +140,28 @@
     saveRoster();
   }
 
+  // Give scored learning completions priority over cosmetic achievements and
+  // "opened" records. A stuck badge/open call must not indefinitely block
+  // an actual exam result. Keep pending confirmed registrations ahead of them.
+  function prioritizeResults() {
+    if (queue.length < 2 || queue[0].path === 'student/identify') return;
+    const idx = queue.findIndex(item =>
+      item.path === 'activity/result' &&
+      ['vocabulary', 'game', 'reading', 'assessment'].includes(item.body?.activity_type) &&
+      item.body?.completion_status === 'completed');
+    if (idx > 0) {
+      const [important] = queue.splice(idx, 1);
+      queue.unshift(important);
+      persist();
+    }
+  }
+
   async function flush() {
-    // navigator.onLine is only a hint and must not suppress a real request.
     if (busy) return;
     busy = true;
     try {
       while (queue.length) {
+        prioritizeResults();
         const item = queue[0], owner = item.owner;
         try {
           if (!owner.token || item.path === 'student/identify') await identify(owner);
@@ -169,16 +176,20 @@
           queue.shift();
           persist();
           settle(item);
+          consecutiveFailures = 0;
         } catch (error) {
           const rejected = error?.status === 400;
           logFailure(rejected ? 'rejected' : 'deferred', item, error);
-          settle(item, error); // Gateway callers receive an honest failure state.
+          settle(item, error);
           if (rejected) {
             queue.shift();
             persist();
             continue;
           }
-          defer((error?.status === 429 ? error.retry : 60) * 1000);
+          // Keep the event for a safe idempotent retry. Respect 429 backoff.
+          consecutiveFailures++;
+          const backoff = Math.min(60000, 12000 * (2 ** Math.min(3, consecutiveFailures - 1)));
+          defer(error?.status === 429 ? (error.retry || 60) * 1000 : backoff);
           break;
         }
       }
@@ -193,7 +204,6 @@
     let confirmation;
     if (waitForConfirmation) {
       confirmation = new Promise((resolve, reject) => {
-        // Non-enumerable: function references never enter sessionStorage.
         Object.defineProperty(item, '_waiter', { value: { resolve, reject }, configurable: true });
       });
     }
@@ -203,9 +213,6 @@
     return confirmation;
   }
 
-  /* Called from the gateway. A caller that asks for confirmation gets a
-     resolving Promise only after the backend has returned student_id + token.
-     The form uses this to avoid claiming registration succeeded on failure. */
   function setIdentity(pass, options = {}) {
     if (!pass) return options.waitForConfirmation ? Promise.reject(new Error('missing_identity')) : undefined;
     const name = String(pass.name || '').trim();
@@ -225,7 +232,6 @@
       };
       roster.push(entry);
     } else {
-      // Only presentation text changes; visitor_id and server identity do not.
       entry.name = name;
       entry.school = school;
     }
@@ -271,12 +277,6 @@
     }
   }
   function certificate(award, ownerOverride) {
-    // ownerOverride lets a caller that captured its own student at launch
-    // (e.g. an external game attempt opened in another tab/iframe) report
-    // the certificate to THAT student even if a different student becomes
-    // "current" in this tab before the award arrives. Existing call sites
-    // that award a certificate for the student active right now keep their
-    // exact behavior by omitting the second argument.
     const owner = ownerOverride || current;
     if (!owner || !award || !Number.isFinite(award.score)) return;
     const key = slug(award.key), score = Math.round(award.score);
