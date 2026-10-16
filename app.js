@@ -240,7 +240,7 @@ const SB = {
   levels: [
     { id:'explore', name:'مستكشِفة', desc:'أكملتِ بطاقة العبور' },
     { id:'learn',   name:'متعلِّمة', desc:'أنهيتِ أول نشاط تعلّم' },
-    { id:'apply',   name:'مُطبِّقة', desc:'أنجزتِ أول ورقة عمل' },
+    { id:'apply',   name:'مُطبِّقة', desc:'طبّقتِ مهاراتك في أنشطة الجسر' },
     { id:'dare',    name:'متحدِّية', desc:'اجتزتِ أول تحدٍّ' },
     { id:'master',  name:'متمكِّنة', desc:'عبرتِ الجسر كاملًا' },
   ],
@@ -282,6 +282,7 @@ const SB = {
     this.progress = (progress && typeof progress === 'object') ? progress : { stars:0, done:[] };
     if (!Array.isArray(this.progress.done)) this.progress.done = [];
     if (!Array.isArray(this.progress.badges)) this.progress.badges = [];
+    if (!Array.isArray(this.progress.completedGames)) this.progress.completedGames = [];
     this.cert = (cert && Array.isArray(cert.awards)) ? cert : { awards: [], current: null };
   },
   // Storage can be disabled (private browsing, quota, sandbox policy). Keep the
@@ -533,6 +534,13 @@ function handleGameReport(data, attempt, origin, route, replyTarget) {
     const pct = Math.round(score / maxScore * 100);
     const stars = pct >= 80 ? 3 : (pct >= 60 ? 2 : (score > 0 ? 1 : 0));
     SB.grantStars(attempt.activity.id, stars);
+    // Genuine completed report (not merely opening a game). Preserve across refreshes.
+    if (!Array.isArray(SB.progress.completedGames)) SB.progress.completedGames = [];
+    if (!SB.progress.completedGames.includes(attempt.activity.id)) {
+      SB.progress.completedGames.push(attempt.activity.id);
+      SB.saveProgress();
+    }
+    refreshAchievementsUI();
     const card = document.querySelector(`.dest[data-id="${attempt.activity.id}"]`);
     if (card) card.querySelectorAll('.dst').forEach((el, i) => {
       if (i < SB.stars(attempt.activity.id)) el.classList.add('on');
@@ -680,6 +688,22 @@ function bookCard(b) {
   </article>`;
 }
 
+/* Official 22-activity learning path — 10 grammar + 3 vocabulary + 6 stories + 3 stations.
+   Legacy games had no completedGames array. A 2- or 3-star game is evidence
+   of a genuine result; merely opening the game gives 1 star and is excluded.
+   New completions use completedGames, including results below 60%.
+   Paper worksheets are optional extras, not part of the official 22. */
+function bridgeStatus() {
+  const gameCatalog = [...SB.data.games, ...SB.data.vocabulary];
+  const completedGames = Array.isArray(SB.progress.completedGames) ? SB.progress.completedGames : [];
+  const games = gameCatalog.filter(g => completedGames.includes(g.id) || SB.stars(g.id) >= 2).length;
+  const books = SB.data.books.filter(b => SB.progress.done.includes('book-' + b.id)).length;
+  const stations = SB.stations.filter(st => SB.stars(st.id) >= 3).length;
+  const total = gameCatalog.length + SB.data.books.length + SB.stations.length;
+  const completed = games + books + stations;
+  return { games, books, stations, completed, total, full: completed === total && !!SB.pass };
+}
+
 const RENDER = {
   games() {
     const host = $('#gamesGrid'); if (!host) return;
@@ -786,13 +810,13 @@ const RENDER = {
   },
   badges() {
     const scores = SB.progress.scores || {};
-    const stationTried  = SB.stations.some(st => (scores[st.id] || 0) > 0);
-    const stationPassed = SB.stations.some(st => SB.stars(st.id) >= 3);
-    const allStations   = SB.stations.every(st => SB.stars(st.id) >= 3);
-    const anyActivity   = SB.progress.done.length > 0 || Object.keys(SB.progress.gameStars || {}).length > 0;
-    const readABook     = SB.progress.done.some(t => t.startsWith('book-'));
-    const vocabSeen = Object.keys(SB.progress.gameStars || {}).some(id => id.startsWith('vocab-'));
-    const allBooks  = SB.data.books.every(b => SB.progress.done.includes('book-' + b.id));
+    const status = bridgeStatus();
+    const stationPassed = status.stations > 0;
+    const allStations   = status.stations === SB.stations.length;
+    const anyActivity   = status.completed > 0;
+    const readABook     = status.books > 0;
+    const completedGames = Array.isArray(SB.progress.completedGames) ? SB.progress.completedGames : [];
+    const vocabSeen = SB.data.vocabulary.some(g => completedGames.includes(g.id) || SB.stars(g.id) >= 2);
     const unlocked = new Set();
     if (SB.pass)       { unlocked.add('first-cross'); unlocked.add('explore'); }
     if (anyActivity)   unlocked.add('learn');
@@ -800,7 +824,7 @@ const RENDER = {
     if (readABook)     unlocked.add('reader');
     if (stationPassed) unlocked.add('dare');
     if (allStations)   unlocked.add('master');
-    if (allStations && allBooks) unlocked.add('full-bridge');
+    if (status.full) unlocked.add('full-bridge');
     const host = $('#badges');
     host.innerHTML = SB.badges.map(b => `
       <div class="badge ${unlocked.has(b.id) ? 'is-on' : ''}">
@@ -822,9 +846,19 @@ const RENDER = {
     return unlocked.size;
   },
   levelsProgress() {
-    const host = $('#progressList');
+    const host = $('#progressList'); if (!host) return;
+    const status = bridgeStatus();
+    // A badge is earned from evidence, not from simply opening an activity.
+    // The optional printable worksheets do not block an otherwise complete bridge.
+    const accomplished = [
+      !!SB.pass,
+      status.completed >= 1,
+      status.completed >= 2,
+      status.stations >= 1,
+      status.full,
+    ];
     host.innerHTML = SB.levels.map((lv, i) => {
-      const done = i === 0 && !!SB.pass;
+      const done = accomplished[i];
       return `
       <div class="prow ${done ? 'is-done' : ''}">
         <span class="pr-check">${ICONS.check}</span>
@@ -850,12 +884,12 @@ function refreshProgress() {
   const stars = totalStars();
   const stDone = stationsPassed();
   const bDone = booksDone();
-  const gamesSeen = Object.keys(SB.progress.gameStars || {})
-    .filter(id => id.startsWith('game-') || id.startsWith('vocab-')).length;
+  const gamesSeen = bridgeStatus().games;
 
-  /* overall learning progress: assessment stations + finished stories + earned badges */
-  const possible = SB.stations.length + SB.data.books.length + SB.badges.length;
-  const pct = Math.round(((stDone + bDone + badgeCount) / possible) * 100);
+  /* Same 22-activity definition used by the teacher dashboard.
+     Badges are rewards, not additional graded activities. */
+  const status = bridgeStatus();
+  const pct = Math.round((status.completed / status.total) * 100);
 
   const C = 2 * Math.PI * 54;
   const ring = $('#ringFill');
@@ -1196,19 +1230,77 @@ function star(ctx, r) {
   ctx.closePath(); ctx.fill();
 }
 
-/* certificate print */
+/* Print exactly ONE certificate. Avoid printing the whole web page (which
+   previously produced many duplicates). Reuse the existing certificate design
+   in a standalone same-origin document and enforce one A4 landscape sheet. */
+function printBridgeCertificate() {
+  const paper = $('#certCard .crt-paper');
+  if (!paper) { toast('تعذّر تجهيز الشهادة للطباعة'); return; }
+  const frame = document.createElement('iframe');
+  frame.setAttribute('title', 'شهادة اجتياز جسر المدارس للطباعة');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;z-index:-1';
+  const styles = [...document.querySelectorAll('link[rel="stylesheet"], style')]
+    .map(el => el.outerHTML).join('\n');
+  const base = document.baseURI.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const copy = paper.cloneNode(true);
+  copy.querySelectorAll('img').forEach(img => { img.loading = 'eager'; });
+  // The printable document contains ONLY the certificate, never the list of awards.
+  frame.srcdoc = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+    <base href="${base}"><title>شهادة اجتياز جسر المدارس</title>${styles}
+    <style>
+      @page { size:A4 landscape; margin:8mm; }
+      html,body { margin:0!important; padding:0!important; width:100%!important;
+        height:100%!important; overflow:hidden!important; background:white!important; }
+      body { display:flex!important; justify-content:center!important; align-items:center!important;
+        box-sizing:border-box!important; }
+      body > .crt-paper { display:block!important; visibility:visible!important; opacity:1!important;
+        position:relative!important; transform:none!important; box-shadow:none!important;
+        box-sizing:border-box!important; width:100%!important; max-width:none!important;
+        height:190mm!important; max-height:190mm!important; min-height:0!important;
+        margin:0!important; break-inside:avoid!important; page-break-inside:avoid!important;
+        break-after:avoid!important; page-break-after:avoid!important; overflow:hidden!important; }
+      body > .crt-paper * { visibility:visible!important; print-color-adjust:exact!important; -webkit-print-color-adjust:exact!important; }
+      @media print { html,body { display:block!important; }
+        body > .crt-paper { margin:0 auto!important; } }
+    </style></head><body>${copy.outerHTML}</body></html>`;
+  frame.addEventListener('load', async () => {
+    try {
+      const doc = frame.contentDocument;
+      await Promise.all([...doc.images].map(img => img.complete
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            const finish = () => resolve();
+            img.addEventListener('load', finish, { once:true });
+            img.addEventListener('error', finish, { once:true });
+            setTimeout(finish, 4000);
+          })));
+      try { await doc.fonts.ready; } catch {}
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    } catch (err) {
+      console.warn('Bridge certificate print unavailable:', err);
+      toast('تعذرت الطباعة، حاولي مرة أخرى');
+    }
+  }, { once:true });
+  document.body.appendChild(frame);
+  const clean = () => { if (frame.parentNode) frame.remove(); };
+  try { frame.contentWindow.addEventListener('afterprint', () => setTimeout(clean, 1000), { once:true }); } catch {}
+  setTimeout(clean, 60000);
+}
 $('#printCert')?.addEventListener('click', () => {
   if (!SB.pass) {
     toast('عبّئي بطاقة العبور أولًا لطباعة شهادتك باسمك');
     document.getElementById('gateway').scrollIntoView({ behavior: 'smooth' });
     return;
   }
-  if (!SB.cert.awards.length) {
-    toast('أكملي نشاطًا بنسبة 80% أو أكثر أولًا لتُجهَّز شهادتك');
-    document.getElementById('assessment').scrollIntoView({ behavior: 'smooth' });
+  if (!bridgeStatus().full) {
+    const p = bridgeStatus();
+    toast(`أكملي أنشطة الجسر لتُفتح شهادة الاجتياز (${p.completed} من ${p.total})`);
     return;
   }
-  window.print();
+  renderCert();
+  printBridgeCertificate();
 });
 
 /* subtle hero art tilt */
@@ -1617,7 +1709,7 @@ function renderResult() {
       <div class="res-actions">
         ${passed ? `<button type="button" class="btn btn-play ripple" id="resCert">
           <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="19" r="10"/><path d="M18 27l-5 13 11-6 11 6-5-13"/></svg>
-          <span class="cta-stack"><span>احصلي على الشهادة</span><small class="cta-en" lang="en">GET YOUR CERTIFICATE</small></span>
+          <span class="cta-stack"><span>شاهدي إنجازك</span><small class="cta-en" lang="en">VIEW YOUR ACHIEVEMENT</small></span>
         </button>` : ''}
         <button type="button" class="btn btn-ghost ripple br-secondary" id="resReread">
           ${ICONS.book}<span lang="en">${passed ? 'Read Another Story' : 'Read Again'}</span>
@@ -1627,13 +1719,9 @@ function renderResult() {
     </div>`;
   if (passed) $('#resCert').addEventListener('click', () => {
     closeBook(true);
-    const ach = $('#certCard') || document.getElementById('achievements');
+    const ach = document.getElementById('achievements');
     if (ach) ach.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setTimeout(() => {
-      const cert = $('#certCard') || $('#printCert');
-      if (cert) { cert.classList.add('attn'); setTimeout(() => cert.classList.remove('attn'), 2600); }
-      toast('شهادتك جاهزة في لوحة الإنجاز — اطبعيها من هناك');
-    }, 800);
+    toast('تم تسجيل إنجاز القصة — شهادة الجسر تُفتح بعد إكمال المسار كاملًا');
   });
   $('#resReread').addEventListener('click', () => {
     if (passed) { closeBook(true); document.getElementById('reading').scrollIntoView({ behavior: 'smooth' }); }
@@ -1952,7 +2040,7 @@ function sqRenderResult() {
       <div class="res-actions">
         ${passed ? `<button type="button" class="btn btn-play ripple" id="sqCert">
           <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="19" r="10"/><path d="M18 27l-5 13 11-6 11 6-5-13"/></svg>
-          <span class="cta-stack"><span>احصلي على الشهادة</span><small class="cta-en" lang="en">GET YOUR CERTIFICATE</small></span>
+          <span class="cta-stack"><span>شاهدي إنجاز المحطة</span><small class="cta-en" lang="en">VIEW STATION RESULT</small></span>
         </button>` : `<button type="button" class="btn btn-play ripple" id="sqRetry">
           ${ICONS.play}<span>أعيدي المحاولة</span>
         </button>`}
@@ -1964,12 +2052,9 @@ function sqRenderResult() {
     </div>`;
   if (passed) $('#sqCert').addEventListener('click', () => {
     closeStation(true);
-    const ach = $('#certCard') || document.getElementById('achievements');
+    const ach = $('#jrStations') || document.getElementById('achievements');
     if (ach) ach.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setTimeout(() => {
-      if (ach) { ach.classList.add('attn'); setTimeout(() => ach.classList.remove('attn'), 2600); }
-      toast('شهادتك جاهزة في لوحة الإنجاز — اطبعيها من هناك');
-    }, 800);
+    toast('تم تسجيل نتيجة المحطة — شهادة الجسر موحدة بعد إكمال جميع الأنشطة');
   });
   $('#sqRetry').addEventListener('click', () => { bridgeAssessmentAttempt = window.BridgeClient?.start(_sqSt, 'assessment'); _sqQ = 0; _sqRight = 0; sqRenderQ(); });
   $('#sqExit').addEventListener('click', () => closeStation());
@@ -1980,13 +2065,17 @@ function sqRenderResult() {
 function renderCert() {
   const card = $('#certCard'); if (!card) return;
   const has = !!SB.pass;
-  const award = SB.cert.awards.find(a => a.key === SB.cert.current)
-    || SB.cert.awards[SB.cert.awards.length - 1] || null;
-  const ready = has && !!award;
-  const name = has ? SB.pass.name : 'ـــــــــــــــــــــــــــــــــــــــــــ';
-  const school = has ? SB.pass.school : '';
-  const activity = award ? award.title : 'أنشطة جسر المدارس التعليمية';
-  const score = award ? award.score : 80;
+  // The student-facing site awards ONE certificate for crossing the entire
+  // bridge; per-activity results remain stored and reported to the teacher.
+  const status = bridgeStatus();
+  const ready = status.full;
+  const esc = v => String(v).replace(/[&<>"']/g, ch => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[ch]));
+  const name = has ? esc(SB.pass.name) : 'ـــــــــــــــــــــــــــــــــــــــــــ';
+  const school = has ? esc(SB.pass.school) : '';
+  const activity = 'اجتياز جسر المدارس · المسار التعليمي الكامل';
+  const score = status.completed === status.total ? 100 : Math.round(status.completed / status.total * 100);
 
   card.innerHTML = `
     <div class="crt-paper" lang="ar" dir="rtl">
@@ -2006,8 +2095,8 @@ function renderCert() {
       <span class="crt-hair" aria-hidden="true"></span>
 
       <div class="crt-kind">
-        <b>شهادة إنجاز</b>
-        <span lang="en" dir="ltr">CERTIFICATE OF ACHIEVEMENT</span>
+        <b>شهادة اجتياز جسر المدارس</b>
+        <span lang="en" dir="ltr">SCHOOLS BRIDGE · CERTIFICATE OF COMPLETION</span>
       </div>
 
       <p class="crt-give">
@@ -2019,15 +2108,15 @@ function renderCert() {
       ${school ? `<div class="crt-school">من مدرسة <b id="certSchool">${school}</b></div>` : `<div class="crt-school" id="certSchool" hidden></div>`}
 
       <p class="crt-for">
-        <span class="crt-ar">لاجتيازها بنجاح:</span>
-        <span class="crt-en" lang="en" dir="ltr">For successfully completing:</span>
+        <span class="crt-ar">لإكمالها بنجاح ألعاب الجسر وقصص القراءة ومحطات التقييم:</span>
+        <span class="crt-en" lang="en" dir="ltr">For successfully completing the entire learning journey:</span>
       </p>
       <div class="crt-act" id="certActivity">${activity}</div>
 
       <div class="crt-seal" id="certScore" role="img" aria-label="Score ${score} percent">
         <span class="crt-seal-ring" aria-hidden="true"></span>
         <b>${score}<small>٪</small></b>
-        <span class="crt-seal-lbl">النتيجة · <span lang="en" dir="ltr">Score</span></span>
+        <span class="crt-seal-lbl">الإنجاز · <span lang="en" dir="ltr">Completed</span></span>
       </div>
 
       <div class="crt-foot">
@@ -2036,37 +2125,23 @@ function renderCert() {
       </div>
     </div>
 
-    <div class="cert-lock" id="certLock" ${ready ? 'hidden' : ''}>
+    ${ready ? '' : `<div class="cert-lock" id="certLock">
       <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="11" y="21" width="26" height="19" rx="5"/><path d="M17 21v-4a7 7 0 0114 0v4"/></svg>
-      <p>${has ? 'أكملي نشاطًا بنسبة 80% أو أكثر لتحصلي على شهادتك' : 'عبّئي بطاقة العبور لتُجهَّز شهادتك باسمك'}</p>
+      <p>${has ? `أكملي جميع أنشطة الجسر لتحصلي على شهادة الاجتياز (${status.completed} من ${status.total})` : 'عبّئي بطاقة العبور لتُجهَّز شهادتك باسمك'}</p>
       ${has ? '' : '<a class="btn btn-primary ripple" href="#gateway"><span>إلى بطاقة العبور</span></a>'}
-    </div>`;
+    </div>`}`;
 
   const aw = $('#certAwards');
-  if (aw) {
-    aw.innerHTML = SB.cert.awards.length > 1
-      ? `<span class="cert-aw-label">شهاداتك:</span>` + SB.cert.awards.map(a =>
-          `<button type="button" class="cert-chip${a.key === (award && award.key) ? ' on' : ''}" data-cert="${a.key}">${a.title} · ${a.score}٪</button>`).join('')
-      : '';
-    if (!aw.dataset.bound) {
-      aw.dataset.bound = '1';
-      aw.addEventListener('click', e => {
-        const c = e.target.closest('[data-cert]');
-        if (!c) return;
-        SB.useCertificate(c.dataset.cert);
-        renderCert();
-        const cc = $('#certCard');
-        cc.classList.add('attn');
-        setTimeout(() => cc.classList.remove('attn'), 1500);
-        cc.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      });
-    }
-  }
+  // Individual quiz scores still exist in the teacher record, but there are
+  // no per-activity certificate selectors on the student-facing website.
+  if (aw) aw.innerHTML = '';
 }
 
 /* ====================== achievements journal (دفتر إنجازي) ====================== */
 function refreshAchievementsUI() {
   refreshProgress();
+  RENDER.levelsProgress();
+  renderCert();
   renderAchJournal();
 }
 
@@ -2107,7 +2182,6 @@ function renderAchJournal() {
     const score = scores[st.id] || 0;
     const passed = score >= 80;
     const tried = score > 0;
-    const certAward = SB.cert.awards.find(a => a.key === st.id);
     const status = passed
       ? '<span class="jrs-chip ok">مكتملة</span>'
       : (tried ? '<span class="jrs-chip try">محاولة طيبة</span>'
@@ -2129,33 +2203,17 @@ function renderAchJournal() {
         </div>
       </div>
       <div class="jrs-side">
-        ${passed && certAward
-          ? `<button type="button" class="jrs-cert" data-ach-cert="${st.id}">
-               ${ICONS.medal}<span>الشهادة مُحرزة</span>
-             </button>
-             <span class="jrs-cert-hint">اضغطي لعرض شهادتك</span>`
+        ${passed
+          ? `<span class="jrs-cert">${ICONS.medal}<span>تم اجتياز المحطة</span></span>
+             <span class="jrs-cert-hint">تم حفظ نتيجتك في سجل الإنجاز</span>`
           : `<a class="jrs-start" href="#assessment">
                ${ICONS.play}<span>${tried ? 'أعيدي المحاولة' : 'ابدئي المحطة'}</span>
              </a>
-             <span class="jrs-cert-hint">${tried ? 'تحتاجين 80٪ للشهادة' : 'الشهادة بانتظارك عند 80٪'}</span>`}
+             <span class="jrs-cert-hint">${tried ? 'حاولي تحقيق 80٪ لاجتياز المحطة' : 'ابدئي المحطة لإكمال المسار'}</span>`}
       </div>
     </article>`;
   }).join('');
-  if (!host.dataset.bound) {
-    host.dataset.bound = '1';
-    host.addEventListener('click', e => {
-      const c = e.target.closest('[data-ach-cert]');
-      if (!c) return;
-      SB.useCertificate(c.dataset.achCert);
-      renderCert();
-      const cc = $('#certCard');
-      if (cc) cc.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setTimeout(() => {
-        if (cc) { cc.classList.add('attn'); setTimeout(() => cc.classList.remove('attn'), 2600); }
-        toast('هذه شهادتك لهذه المحطة — اطبعيها من هنا');
-      }, 900);
-    });
-  }
+
 }
 
 // Connected destination cards (.dest-link) keep their existing appearance —
