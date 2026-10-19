@@ -995,9 +995,9 @@ function initPassForm() {
     const fullName = name.split(/\s+/).filter(Boolean);
     let ok = true;
 
-    // Values intentionally match the existing two schools in the teacher dashboard.
-    // The long formal names are display labels only, avoiding duplicate school rows.
-    const schoolSelected = ['ب 29', 'مدرسة عائشه'].includes(school);
+    // Exact configured participating-school names, as displayed in the teacher dashboard.
+    // Both the selected label and stored school value match the configured names.
+    const schoolSelected = ['الابتدائية التاسعة والعشرون', 'ابتدائية عائشة ام المؤمنين'].includes(school);
     [[nameI, name, fullName.length >= 2], [schoolI, school, schoolSelected]].forEach(([input, val, valid]) => {
       const field = input.closest('.field');
       const err = field.querySelector('.f-error');
