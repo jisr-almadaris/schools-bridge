@@ -73,13 +73,17 @@
             <small class="f-error" hidden>فضلًا اكتبي الاسم الثلاثي</small>
           </label>
 
-          <label class="field" for="schoolName">
+          <label class="field field-school" for="schoolName">
             <span class="f-label">اسم المدرسة</span>
             <span class="f-ico" aria-hidden="true">
               <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 40V22L24 11l15 11v18"/><path d="M19 40v-9h10v9"/><path d="M24 11V5h8"/></svg>
             </span>
-            <input id="schoolName" name="schoolName" type="text" inputmode="text" placeholder="اسم المدرسة" required>
-            <small class="f-error" hidden>فضلًا اكتبي اسم المدرسة</small>
+            <select id="schoolName" name="schoolName" required aria-label="اختاري مدرستك">
+              <option value="" disabled selected>اختاري مدرستك</option>
+              <option value="ب 29">الابتدائية التاسعة والعشرون</option>
+              <option value="مدرسة عائشه">مدرسة أم المؤمنين عائشة</option>
+            </select>
+            <small class="f-error" hidden>فضلًا اختاري مدرستك</small>
           </label>
 
           <button class="btn btn-send ripple" type="submit">

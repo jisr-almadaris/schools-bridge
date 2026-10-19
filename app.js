@@ -963,6 +963,20 @@ function initPassForm() {
   const form = $('#passForm');
   const nameI = $('#studentName'), schoolI = $('#schoolName');
   const send = $('button[type="submit"]', form), submitStatus = $('#passSubmitStatus');
+  // Warm the public API while the student is typing; no name/school is sent.
+  // This can shorten first-time registration after a sleeping Render instance.
+  let bridgeWarmed = false;
+  const warmBridge = () => {
+    if (bridgeWarmed) return;
+    bridgeWarmed = true;
+    try {
+      void fetch('https://schools-bridge-admin.onrender.com/api/public/site-settings', {
+        method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store'
+      }).catch(() => {});
+    } catch { /* wake-up attempt is optional; registration still works */ }
+  };
+  nameI.addEventListener('focus', warmBridge, { once: true });
+  schoolI.addEventListener('focus', warmBridge, { once: true });
   const setSubmitState = (state, message = '') => {
     const pending = state === 'pending';
     send.disabled = pending;
@@ -981,7 +995,10 @@ function initPassForm() {
     const fullName = name.split(/\s+/).filter(Boolean);
     let ok = true;
 
-    [[nameI, name, fullName.length >= 2], [schoolI, school, school.length >= 2]].forEach(([input, val, valid]) => {
+    // Values intentionally match the existing two schools in the teacher dashboard.
+    // The long formal names are display labels only, avoiding duplicate school rows.
+    const schoolSelected = ['ب 29', 'مدرسة عائشه'].includes(school);
+    [[nameI, name, fullName.length >= 2], [schoolI, school, schoolSelected]].forEach(([input, val, valid]) => {
       const field = input.closest('.field');
       const err = field.querySelector('.f-error');
       field.classList.remove('is-error'); err.hidden = true;
@@ -1003,7 +1020,9 @@ function initPassForm() {
     }
     setSubmitState('pending', 'جارٍ حفظ بطاقة العبور بأمان…');
     try {
-      await window.BridgeClient.setIdentity({ name, school }, { force: true, waitForConfirmation: true });
+      // Reuse a previously confirmed student token for instant return visits.
+      // New students still wait for the server's confirmation (never fake success).
+      await window.BridgeClient.setIdentity({ name, school }, { waitForConfirmation: true });
       // Registers/switches local state only after the backend accepted identity.
       // A different name + school is an independent append-only student slot.
       const switched = SB.registerStudent({ name, school });

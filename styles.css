@@ -853,13 +853,28 @@ section{scroll-margin-top:18px}
   color:#9389AB;pointer-events:none;display:flex;align-items:center;justify-content:center;
 }
 .f-ico svg{width:19px;height:19px}
-.pass-form .field input{
+.pass-form .field input,
+.pass-form .field select{
   width:100%;border:1px solid #E9EDF5;background:#F4F7FB;border-radius:999px;
   padding:14px 20px;padding-inline-start:48px;font-size:.95rem;color:#3D3354;
   transition:border-color .2s,box-shadow .2s,background .2s;
 }
 .pass-form .field input::placeholder{color:#8A829F;opacity:.8;font-size:.93rem}
-.pass-form .field input:focus{border-color:#B9A9DC;background:#fff;box-shadow:0 0 0 4px rgba(140,123,220,.15)}
+.pass-form .field input:focus,
+.pass-form .field select:focus{border-color:#B9A9DC;background:#fff;box-shadow:0 0 0 4px rgba(140,123,220,.15)}
+/* Same original pill — only the school field gets a small native-style chevron. */
+.pass-form .field-school select{
+  font-family:var(--fb);font-weight:500;appearance:none;-webkit-appearance:none;
+  padding-inline-end:44px;cursor:pointer;direction:rtl;
+}
+.pass-form .field-school select:invalid{color:#8A829F}
+.pass-form .field-school select option{color:#3D3354;background:#fff}
+.pass-form .field-school::after{
+  content:"";position:absolute;inset-inline-end:20px;top:21px;
+  width:8px;height:8px;border-right:2px solid #9389AB;
+  border-bottom:2px solid #9389AB;transform:rotate(45deg);pointer-events:none;
+}
+.pass-form .field.is-error select{border-color:var(--blush);animation:shake .4s}
 .pass-form .f-error{margin:6px 16px 0}
 
 .btn-send{
