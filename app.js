@@ -476,6 +476,7 @@ for (const activity of [...SB.data.games, ...SB.data.vocabulary]) {
   }
 }
 const gameAttempts = new Map();
+const gameWindowAttempts = new Map(); // Tie each opened tab to its ORIGINAL pupil.
 const gameAttemptKey = (origin, activityId) => origin + '::' + activityId;
 const SESSION_PREFIX = 'schools-bridge-session-v1::';
 function newGameSessionId() {
@@ -499,7 +500,8 @@ function trackGameAttempt(activity, kind, urlForOrigin) {
     try {
       const key = gameAttemptKey(new URL(urlForOrigin, location.href).origin, activity.id);
       const previous = gameAttempts.get(key);
-      if (previous?.sessionChannel) previous.sessionChannel.close();
+      // Do NOT close an earlier attempt just because another pupil launches
+      // the same game; the original channel stays tied to the original pupil.
       gameAttempts.set(key, attempt);
     } catch { /* unsupported destination */ }
   }
@@ -509,12 +511,16 @@ function trackGameAttempt(activity, kind, urlForOrigin) {
 function handleGameReport(data, attempt, origin, route, replyTarget) {
   if (!data || typeof data !== 'object' || data.source !== 'schools-bridge-game') return;
   if (!attempt?.owner || String(data.activityId || '') !== attempt.activity.id) return;
-  if (gameAttempts.get(gameAttemptKey(origin, attempt.activity.id)) !== attempt) return;
+  // For simultaneous tabs the 'latest game' map is intentionally NOT the
+  // source of truth. The authenticated attempt is bound to its own window
+  // or unguessable BroadcastChannel session.
+  if (route === 'opener' && attempt.gameWindow && replyTarget !== attempt.gameWindow) return;
   if (route === 'channel' && data.sessionId !== attempt.sessionId) return;
   if (data.type === 'ready') {
     const message = {
       source: 'schools-bridge-host', type: 'identity', activityId: attempt.activity.id,
       name: attempt.owner.name, school: attempt.owner.school,
+      visitor_id: attempt.owner.visitor_id, // Stable device roster identity, not a token.
       ...(attempt.sessionId ? { sessionId: attempt.sessionId } : {}),
     };
     try {
@@ -533,18 +539,38 @@ function handleGameReport(data, attempt, origin, route, replyTarget) {
     window.BridgeClient?.result(attempt, score, maxScore);
     const pct = Math.round(score / maxScore * 100);
     const stars = pct >= 80 ? 3 : (pct >= 60 ? 2 : (score > 0 ? 1 : 0));
-    SB.grantStars(attempt.activity.id, stars);
-    // Genuine completed report (not merely opening a game). Preserve across refreshes.
-    if (!Array.isArray(SB.progress.completedGames)) SB.progress.completedGames = [];
-    if (!SB.progress.completedGames.includes(attempt.activity.id)) {
-      SB.progress.completedGames.push(attempt.activity.id);
-      SB.saveProgress();
+    // Save this completion under the student who opened the game, NEVER
+    // under whichever student currently has the bridge tab open.
+    const ownerKey = sbStudentKey(attempt.owner.name, attempt.owner.school);
+    if (ownerKey === SB.currentKey) {
+      SB.grantStars(attempt.activity.id, stars);
+      if (!Array.isArray(SB.progress.completedGames)) SB.progress.completedGames = [];
+      if (!SB.progress.completedGames.includes(attempt.activity.id)) {
+        SB.progress.completedGames.push(attempt.activity.id);
+        SB.saveProgress();
+      }
+      refreshAchievementsUI();
+      const card = document.querySelector(`.dest[data-id="${attempt.activity.id}"]`);
+      if (card) card.querySelectorAll('.dst').forEach((el, i) => {
+        if (i < SB.stars(attempt.activity.id)) el.classList.add('on');
+      });
+    } else {
+      // Preserve the first pupil's local history while a second pupil is
+      // active. Server result has already been queued for attempt.owner.
+      try {
+        const key = SB_PROGRESS_KEY + ownerKey;
+        const ownerProgress = JSON.parse(localStorage.getItem(key) || '{}');
+        if (!ownerProgress || typeof ownerProgress !== 'object') throw Error('invalid_saved_progress');
+        if (!ownerProgress.gameStars) ownerProgress.gameStars = {};
+        ownerProgress.gameStars[attempt.activity.id] = Math.max(
+          Number(ownerProgress.gameStars[attempt.activity.id] || 0), stars
+        );
+        if (!Array.isArray(ownerProgress.completedGames)) ownerProgress.completedGames = [];
+        if (!ownerProgress.completedGames.includes(attempt.activity.id))
+          ownerProgress.completedGames.push(attempt.activity.id);
+        localStorage.setItem(key, JSON.stringify(ownerProgress));
+      } catch (error) { console.warn('Could not persist previous pupil local progress', error); }
     }
-    refreshAchievementsUI();
-    const card = document.querySelector(`.dest[data-id="${attempt.activity.id}"]`);
-    if (card) card.querySelectorAll('.dst').forEach((el, i) => {
-      if (i < SB.stars(attempt.activity.id)) el.classList.add('on');
-    });
   } else if (data.type === 'certificate') {
     if (attempt.gameCertificateReceived) return;
     const score = Number(data.score);
@@ -585,14 +611,15 @@ function launchGameTab(activity, kind, href) {
     } catch (error) { console.warn('Game channel unavailable; using window messaging', error); }
   }
   const opened = window.open(destination, '_blank');
-  if (attempt && opened) attempt.gameWindow = opened;
+  if (attempt && opened) { attempt.gameWindow = opened; gameWindowAttempts.set(opened, attempt); }
 }
 window.addEventListener('message', event => {
   if (!event || !GAME_ORIGINS.has(event.origin)) return;
   const data = event.data;
   if (!data || data.source !== 'schools-bridge-game') return;
   const activityId = String(data.activityId || '');
-  const attempt = gameAttempts.get(gameAttemptKey(event.origin, activityId));
+  const attempt = gameWindowAttempts.get(event.source) ||
+    gameAttempts.get(gameAttemptKey(event.origin, activityId));
   if (!attempt) { console.warn('Bridge game message ignored: no tracked attempt for', activityId); return; }
   if (attempt.gameWindow && event.source !== attempt.gameWindow) return;
   handleGameReport(data, attempt, event.origin, 'opener', event.source);
