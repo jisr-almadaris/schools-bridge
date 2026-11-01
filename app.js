@@ -529,6 +529,23 @@ function handleGameReport(data, attempt, origin, route, replyTarget) {
     } catch (error) { console.warn('Game identity reply failed', error); }
     return;
   }
+  if (data.type === 'learning-trace') {
+    // Exactly the same verified opener/channel attempt as the score receiver.
+    // No personally identifying fields or raw question text are accepted.
+    if (attempt.activity.id !== 'game-comparisons') return;
+    const chunk=Number(data.chunk);
+    const items=data.items;
+    if (!Number.isInteger(chunk) || chunk<0 || chunk>4 || !Array.isArray(items) ||
+        items.length<1 || items.length>20 || items.some(x=>
+          !x || !Number.isInteger(x.question_index) ||
+          typeof x.correct!=='boolean' || typeof x.hint_used!=='boolean' ||
+          !Number.isInteger(x.response_ms) || x.response_ms<0 || x.response_ms>120000)) return;
+    if (!attempt.tracedChunks) attempt.tracedChunks = new Set();
+    if (attempt.tracedChunks.has(chunk)) return;
+    attempt.tracedChunks.add(chunk);
+    window.BridgeClient?.learningTrace(attempt,chunk,items);
+    return;
+  }
   if (data.type === 'completed') {
     if (attempt.gameCompletionReceived) return;
     const score = Number(data.score), maxScore = Number(data.maxScore);
