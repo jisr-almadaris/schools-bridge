@@ -26,7 +26,7 @@
   const TAB_KEY = 'bridge_identity';
   const QUEUE_KEY = 'bridge_queue';
   const LEGACY_KEY = 'bridge_visitor_id';
-  const PATHS = ['student/identify', 'activity/opened', 'activity/result', 'assessment/result'];
+  const PATHS = ['student/identify', 'activity/opened', 'activity/result', 'assessment/result', 'learning/trace'];
 
   let visitor = read('localStorage', LEGACY_KEY, null);
   if (!visitor) { visitor = 'v-' + uid(); write('localStorage', LEGACY_KEY, visitor); }
@@ -147,8 +147,9 @@
     if (queue.length < 2 || queue[0].path === 'student/identify') return;
     const idx = queue.findIndex(item =>
       item.path === 'activity/result' &&
-      ['vocabulary', 'game', 'reading', 'assessment'].includes(item.body?.activity_type) &&
-      item.body?.completion_status === 'completed');
+      item.body?.completion_status === 'completed' &&
+      (['vocabulary', 'game', 'reading', 'assessment'].includes(item.body?.activity_type) ||
+       (queue[0].path === 'learning/trace' && item.body?.activity_type === 'certificate')));
     if (idx > 0) {
       const [important] = queue.splice(idx, 1);
       queue.unshift(important);
@@ -178,6 +179,12 @@
           settle(item);
           consecutiveFailures = 0;
         } catch (error) {
+          // Diagnostic telemetry must NEVER stall a graded result or a certificate
+          // when a server version without the optional endpoint is deployed.
+          if (item.path === 'learning/trace' && [400,404,405,410,422,501,503].includes(error?.status)) {
+            console.warn('Optional learning fingerprint temporarily unavailable; grade/certificate unaffected.');
+            queue.shift(); persist(); settle(item, null); continue;
+          }
           const rejected = error?.status === 400;
           logFailure(rejected ? 'rejected' : 'deferred', item, error);
           settle(item, error);
@@ -276,6 +283,16 @@
       }, attempt.owner);
     }
   }
+  function learningTrace(attempt, chunk, items) {
+    if (!attempt?.owner || !Number.isInteger(chunk) || !Array.isArray(items) || !items.length) return;
+    if (attempt.activity?.id !== 'game-comparisons') return;
+    // Only numerical/boolean answers; never forward a name or a full question.
+    const safeItems=items.slice(0,20).map(x=>({question_index:Number(x.question_index),
+      correct:x.correct === true, response_ms:Number(x.response_ms), hint_used:x.hint_used === true}));
+    if (safeItems.some(x=>!Number.isInteger(x.question_index) || !Number.isInteger(x.response_ms))) return;
+    enqueue('learning/trace', { event_id:attempt.event_id+'-trace-'+chunk,
+      activity_key:attempt.activity.id,chunk,items:safeItems },attempt.owner);
+  }
   function certificate(award, ownerOverride) {
     const owner = ownerOverride || current;
     if (!owner || !award || !Number.isFinite(award.score)) return;
@@ -312,7 +329,7 @@
   }
 
   window.BridgeClient = {
-    setIdentity, start, result, certificate, achievement, flush, listStudents, isIdentityConfirmed
+    setIdentity, start, result, learningTrace, certificate, achievement, flush, listStudents, isIdentityConfirmed
   };
   window.addEventListener('online', flush);
   defer(3000);
