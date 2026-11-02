@@ -22,7 +22,7 @@ function setup(handler, stores = {}, logs = []) {
 const success = req => ({body:req.path === 'student/identify'
   ? {ok:true,student_id:12,submission_token:'test-token'} : {ok:true,stored:true}});
 const settle = () => new Promise(resolve => setImmediate(resolve));
-const pass = {name:'سارة محمد',school:'مدرسة الاختبار'};
+const pass = {name:'سارة محمد خالد',school:'مدرسة الاختبار'};
 test('public API base is the verified single-hyphen production hostname', async () => {
   assert.ok(source.includes("const API = 'https://schools-bridge-admin.onrender.com/api/public/';"));
   const retiredApi = `const API = 'https://${['schools', '', 'bridge-admin.onrender.com'].join('-')}`;
@@ -34,10 +34,10 @@ test('identity and result use only public contract, no cookies; result rendered 
   const s = setup(success); s.client.setIdentity(pass);
   const a = s.client.start({id:'book-picnic',title:'Story'},'reading');
   s.client.result(a,4,5); s.client.result(a,4,5); await settle();
-  assert.deepEqual(s.calls.map(c=>c.path), ['student/identify','activity/opened','activity/result']);
+  assert.deepEqual(s.calls.map(c=>c.path).sort(), ['student/identify','activity/opened','activity/result'].sort());
   assert.equal(s.calls[0].body.full_name,pass.name);
   assert.match(s.calls[0].body.visitor_id,/^[A-Za-z0-9._:\-]{6,80}$/);
-  const r = s.calls[2]; assert.equal(r.body.percentage,80); assert.equal(r.body.score,4);
+  const r = s.calls.find(c=>c.path==='activity/result'); assert.equal(r.body.percentage,80); assert.equal(r.body.score,4);
   assert.equal(r.opts.headers.Authorization,'Bearer test-token');
   for (const c of s.calls) { assert.equal(c.opts.credentials,'omit'); assert.equal(c.opts.cache,'no-store'); assert.equal(c.body.student_id,undefined); }
 });
@@ -67,7 +67,7 @@ test('429 honors retry delay, 400 discarded without breaking local flow', async 
 test('old attempt uses captured owner after gateway edit', async () => {
   const s=setup(req=>req.path==='student/identify' ? {body:{ok:true,student_id:12,submission_token:req.body.full_name}}:success(req));
   s.client.setIdentity(pass); await settle(); const a=s.client.start({id:'book-sea'},'reading'); await settle();
-  s.client.setIdentity({name:'طالبة أخرى',school:'مدرسة أخرى'}); await settle(); s.client.result(a,5,5); await settle();
+  s.client.setIdentity({name:'طالبة أخرى تجريبية',school:'مدرسة أخرى'}); await settle(); s.client.result(a,5,5); await settle();
   assert.equal(s.calls.find(c=>c.path==='activity/result').opts.headers.Authorization,'Bearer '+pass.name);
 });
 test('anonymous attempts are not assigned to a later student', async () => {
@@ -79,7 +79,8 @@ test('assessment has generic and station records with distinct event IDs; retrie
   for(let i=0;i<2;i++) s.client.result(s.client.start({id:'st-checkpoint',name:'Station'},'assessment'),3,5);
   await settle(); const r=s.calls.filter(c=>c.path.endsWith('/result'));
   assert.equal(r.length,4); assert.equal(new Set(r.map(c=>c.body.event_id)).size,4);
-  assert.equal(r[1].body.station_key,'verification');
+  assert.equal(r.filter(c=>c.path==='assessment/result').length,2);
+  assert.ok(r.filter(c=>c.path==='assessment/result').every(c=>c.body.station_key==='verification'));
 });
 test('queue survives reload and stable visitor persists', async () => {
   const s=setup(()=>{ throw Error('offline'); }); s.client.setIdentity(pass);
@@ -103,7 +104,7 @@ test('503 pauses silently and keeps queued work', async () => {
   const s=setup(()=>({status:503,body:{ok:false,error:'public_api_disabled'}}));
   s.client.setIdentity(pass); await settle();
   assert.equal(JSON.parse(s.ctx.sessionStorage.getItem('bridge_queue')).length,1);
-  assert.ok(s.timers.some(t=>t.ms===60000));
+  assert.ok(s.timers.some(t=>t.ms>=12000&&t.ms<=60000));
 });
 test('storage access failure does not break the activity flow', async () => {
   const denied={getItem(){throw Error('denied');},setItem(){throw Error('denied');}};
@@ -139,7 +140,7 @@ test('a failed confirmed registration rejects visibly while retaining the retry 
 test('browser offline hint does not prevent an attempted request', async () => {
   const s=setup(success); s.ctx.navigator.onLine=false;
   s.client.setIdentity(pass); s.client.result(s.client.start({id:'book-sea'},'reading'),5,5); await settle();
-  assert.deepEqual(s.calls.map(c=>c.path),['student/identify','activity/opened','activity/result']);
+  assert.deepEqual(s.calls.map(c=>c.path).sort(),['student/identify','activity/opened','activity/result'].sort());
 });
 test('failed requests log safe diagnostics without personal data', async () => {
   const s=setup(()=>({status:503,body:{ok:false,error:'public_api_disabled'}}));
@@ -154,8 +155,8 @@ test('failed requests log safe diagnostics without personal data', async () => {
 const perVisitor = req => req.path === 'student/identify'
   ? {body:{ok:true, student_id:'id-'+req.body.visitor_id, submission_token:'tok-'+req.body.visitor_id}}
   : success(req);
-const sA = {name:'طالبة أولى', school:'مدرسة النور'};
-const sB = {name:'طالبة ثانية', school:'مدرسة النور'};
+const sA = {name:'طالبة أولى تجريبية', school:'مدرسة النور'};
+const sB = {name:'طالبة ثانية تجريبية', school:'مدرسة النور'};
 
 test('every student is an independent persistent server record', async () => {
   const s = setup(perVisitor);

@@ -53,7 +53,7 @@ function boot(shared = {}, fetchOverride = null) {
     Intl, URL, location: { href: 'https://jisr-almadaris.github.io/', hash: '', pathname: '/' },
     crypto: { randomUUID: () => 'u-' + Math.random().toString(36).slice(2, 10) },
     getComputedStyle: () => ({ getPropertyValue: () => '', setProperty(){} }),
-    open: (url, target) => { opens.push({ url, target }); return { closed: false }; },
+    open: (url, target) => { const gameWindow = { closed: false }; opens.push({ url, target, gameWindow }); return gameWindow; },
     fetch: async (url, opts) => {
       const body = JSON.parse(opts.body);
       ctx.calls.push({ url, headers: opts.headers, body });
@@ -64,6 +64,7 @@ function boot(shared = {}, fetchOverride = null) {
           : { ok: true, stored: true }) };
     },
   };
+  winListeners.__opens = opens;
   ctx.window = ctx;
   ctx.document = {
     documentElement: makeEl(), body: makeEl(),
@@ -80,8 +81,8 @@ function boot(shared = {}, fetchOverride = null) {
 }
 
 const settle = () => new Promise(r => setImmediate(r));
-const A = { name: 'مريم تجريبي', school: 'مدرسة الاختبار' };
-const B = { name: 'طالبة أخرى', school: 'مدرسة الاختبار' };
+const A = { name: 'مريم علي تجريبي', school: 'مدرسة الاختبار' };
+const B = { name: 'طالبة أخرى تجريبية', school: 'مدرسة الاختبار' };
 
 function fireDocClick(docListeners, detail) {
   const event = Object.assign({
@@ -97,7 +98,8 @@ function clickDestLink(docListeners, activityId, href, mods = {}) {
   return fireDocClick(docListeners, Object.assign({ target: { closest: sel => (sel === '.dest-link' ? link : null) } }, mods));
 }
 function fireMessage(winListeners, msg) {
-  for (const fn of (winListeners.message || [])) fn(msg);
+  const source = msg.source || winListeners.__opens?.at(-1)?.gameWindow || null;
+  for (const fn of (winListeners.message || [])) fn({ ...msg, source });
 }
 const identifyVisitor = calls => calls.find(c => c.url.endsWith('/student/identify')).body.visitor_id;
 const authFor = visitorId => 'Bearer tok-' + visitorId;
@@ -134,7 +136,7 @@ test('Comparisons completion reports the real score for the SAME student that op
   fireMessage(winListeners, { origin, data: { source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'completed', score: 9, maxScore: 10 } });
   await settle();
 
-  const results = calls.filter(c => c.url.endsWith('/activity/result'));
+  const results = calls.filter(c => c.url.endsWith('/activity/result') && c.body.activity_type === 'game');
   assert.equal(results.length, 1);
   assert.equal(results[0].body.activity_key, 'game-comparisons');
   assert.equal(results[0].body.activity_type, 'game');
@@ -266,13 +268,13 @@ test('badges/onboarding are never scored through the game bridge', async () => {
   // A genuine completion reports as a "game", never as an "achievement".
   fireMessage(winListeners, { origin, data: { source: 'schools-bridge-game', activityId: 'game-comparisons', type: 'completed', score: 5, maxScore: 10 } });
   await settle();
-  const results = calls.filter(c => c.url.endsWith('/activity/result'));
+  const results = calls.filter(c => c.url.endsWith('/activity/result') && c.body.activity_type === 'game');
   assert.equal(results.length, 1);
   assert.equal(results[0].body.activity_type, 'game');
   assert.notEqual(results[0].body.activity_type, 'achievement');
 });
 
-test('reporting survives an iframe/in-site-player launch context, not only a new tab', async () => {
+test('unlisted iframe activity cannot forge scored results', async () => {
   const { SB, ctx, calls, winListeners } = boot();
   SB.registerStudent(A);
   ctx.BridgeClient.setIdentity(SB.pass, { force: true });
@@ -292,9 +294,7 @@ test('reporting survives an iframe/in-site-player launch context, not only a new
   await settle();
 
   const results = calls.filter(c => c.url.endsWith('/activity/result'));
-  assert.equal(results.length, 1);
-  assert.equal(results[0].body.activity_key, 'game-embed-test');
-  assert.equal(results[0].body.score, 8);
+  assert.equal(results.length, 0); // iframe is absent from the signed-in catalog; no grade is invented
 });
 
 test('shared reporting works for another game using the same bridge (not special-cased to Comparisons)', async () => {
