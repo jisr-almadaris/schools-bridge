@@ -529,15 +529,33 @@ function handleGameReport(data, attempt, origin, route, replyTarget) {
     } catch (error) { console.warn('Game identity reply failed', error); }
     return;
   }
+  if (data.type === 'new-round') {
+    const id = String(data.round_id || '');
+    if (!/^[A-Za-z0-9._:-]{8,120}$/.test(id) || id === attempt.gameRoundId) return;
+    attempt.gameRoundId = id;
+    // This is a NEW result attempt for the same identity-bound game window.
+    attempt.event_id = id;
+    attempt.submitted = false;
+    attempt.gameCompletionReceived = false;
+    attempt.gameCertificateReceived = false;
+    attempt.tracedChunks = new Set();
+    return;
+  }
   if (data.type === 'learning-trace') {
     // Exactly the same verified opener/channel attempt as the score receiver.
     // No personally identifying fields or raw question text are accepted.
-    if (attempt.activity.id !== 'game-comparisons') return;
+    if (!new Set([
+      'game-comparisons','game-possessives','game-conjunctions','game-present-simple',
+      'game-wh-questions','game-how-often','game-gerund-infinitive',
+      'game-present-progressive','game-subject-pronouns','game-past-simple',
+      'vocab-pick-1','vocab-pick-2','vocab-spell-3'
+    ]).has(attempt.activity.id)) return;
     const chunk=Number(data.chunk);
     const items=data.items;
     if (!Number.isInteger(chunk) || chunk<0 || chunk>4 || !Array.isArray(items) ||
         items.length<1 || items.length>20 || items.some(x=>
           !x || !Number.isInteger(x.question_index) ||
+          (x.question_id!==undefined && (typeof x.question_id!=='string' || !/^[A-Za-z0-9._:-]{1,64}$/.test(x.question_id))) ||
           typeof x.correct!=='boolean' || typeof x.hint_used!=='boolean' ||
           !Number.isInteger(x.response_ms) || x.response_ms<0 || x.response_ms>120000)) return;
     if (!attempt.tracedChunks) attempt.tracedChunks = new Set();
@@ -1686,14 +1704,33 @@ function readerNext() {
 }
 function readerPrev() { if (_rPage > 0) _readerStep(_rPage - 1); }
 
+// Only time with the quiz tab visible is counted; clocks reset per question.
+const bridgeAnswerClock = (() => {
+  let started = 0, accumulated = 0, hidden = false;
+  const tick = () => {
+    if (started && !hidden) accumulated += Math.max(0, performance.now() - started);
+    started = performance.now();
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && !hidden) { tick(); hidden = true; }
+    else if (!document.hidden && hidden) { hidden = false; started = performance.now(); }
+  });
+  return {
+    reset() { started = performance.now(); accumulated = 0; hidden = document.hidden; },
+    elapsed() { tick(); return Math.min(120000, Math.max(0, Math.round(accumulated))); },
+  };
+})();
+let bridgeReadingTrace = [];
+let bridgeAssessmentTrace = [];
 function renderQuiz() {
   if (bridgeReadingAttempt?.submitted) bridgeReadingAttempt = window.BridgeClient?.start(_rBook, 'reading');
   brSetMode('quiz');
-  _rRight = 0; _rQ = 0;
+  _rRight = 0; _rQ = 0; bridgeReadingTrace = [];
   renderQuestion();
 }
 
 function renderQuestion() {
+  bridgeAnswerClock.reset();
   const b = _rBook, q = b.quiz[_rQ], n = b.quiz.length, i = _rQ;
   const opts = q.type === 'tf'
     ? ['True', 'False']
@@ -1724,6 +1761,9 @@ function renderQuestion() {
       x.disabled = true;
     });
     btn.classList.add('picked');
+    bridgeReadingTrace.push({question_index: _rQ, correct:k === okIdx,
+      response_ms:bridgeAnswerClock.elapsed(), hint_used:false,
+      question_type:q.type === 'tf' ? 'true_false' : 'choice'});
     if (k === okIdx) { _rRight++; btn.classList.add('ok'); }
     else { btn.classList.add('no'); }
     const pause = matchMedia('(prefers-reduced-motion: reduce)').matches ? 350 : 850;
@@ -1736,6 +1776,7 @@ function renderQuestion() {
 }
 
 function renderResult() {
+  window.BridgeClient?.learningTrace(bridgeReadingAttempt, 0, bridgeReadingTrace);
   window.BridgeClient?.result(bridgeReadingAttempt, _rRight, _rBook.quiz.length);
   brSetMode('result');
   const b = _rBook, n = b.quiz.length;
@@ -1989,7 +2030,7 @@ function openStation(id) {
   const st = SB.stations.find(x => x.id === id); if (!st) return;
   bridgeAssessmentAttempt = window.BridgeClient?.start(st, 'assessment');
   const el = ensureStation();
-  _sqSt = st; _sqQ = 0; _sqRight = 0;
+  _sqSt = st; _sqQ = 0; _sqRight = 0; bridgeAssessmentTrace = [];
   $('#sqTitle').textContent = `${st.name} · `;
   $('#sqTitle').innerHTML = `${st.name} <span class="sq-title-en" lang="en" dir="ltr">${st.en}</span>`;
   $('#sqStagePill').textContent = `المحطة ${st.n} من ٣`;
@@ -2022,6 +2063,7 @@ function closeStation(skipRestore) {
 }
 
 function sqRenderQ() {
+  bridgeAnswerClock.reset();
   const st = _sqSt, q = st.qs[_sqQ], n = st.qs.length, i = _sqQ;
   const typeName = q.t === 'tf' ? 'True or False' : 'Multiple Choice';
   const opts = q.t === 'tf' ? ['True', 'False'] : q.o;
@@ -2050,6 +2092,9 @@ function sqRenderQ() {
       x.disabled = true;
     });
     btn.classList.add('picked');
+    bridgeAssessmentTrace.push({question_index:_sqQ, correct:k===correctIdx,
+      response_ms:bridgeAnswerClock.elapsed(), hint_used:false,
+      question_type:q.t==='tf' ? 'true_false' : 'choice'});
     if (k === correctIdx) { _sqRight++; btn.classList.add('ok'); }
     else { btn.classList.add('no'); }
     const pause = matchMedia('(prefers-reduced-motion: reduce)').matches ? 350 : 900;
@@ -2065,6 +2110,7 @@ function sqRenderQ() {
 }
 
 function sqRenderResult() {
+  window.BridgeClient?.learningTrace(bridgeAssessmentAttempt, 0, bridgeAssessmentTrace);
   window.BridgeClient?.result(bridgeAssessmentAttempt, _sqRight, _sqSt.qs.length);
   const st = _sqSt, n = st.qs.length;
   const pct = Math.round((_sqRight / n) * 100);
@@ -2119,7 +2165,7 @@ function sqRenderResult() {
     if (ach) ach.scrollIntoView({ behavior: 'smooth', block: 'center' });
     toast('تم تسجيل نتيجة المحطة — شهادة الجسر موحدة بعد إكمال جميع الأنشطة');
   });
-  $('#sqRetry').addEventListener('click', () => { bridgeAssessmentAttempt = window.BridgeClient?.start(_sqSt, 'assessment'); _sqQ = 0; _sqRight = 0; sqRenderQ(); });
+  $('#sqRetry').addEventListener('click', () => { bridgeAssessmentAttempt = window.BridgeClient?.start(_sqSt, 'assessment'); _sqQ = 0; _sqRight = 0; bridgeAssessmentTrace = []; sqRenderQ(); });
   $('#sqExit').addEventListener('click', () => closeStation());
 }
 

@@ -76,8 +76,8 @@ function boot(shared = {}) {
 // Values created inside the vm realm have foreign prototypes; compare as plain JSON.
 const plain = v => JSON.parse(JSON.stringify(v));
 
-const A = { name: 'طالبة أولى', school: 'مدرسة النور' };
-const B = { name: 'طالبة ثانية', school: 'مدرسة النور' };
+const A = { name: 'طالبة أولى تجريبية', school: 'مدرسة النور' };
+const B = { name: 'طالبة ثانية تجريبية', school: 'مدرسة النور' };
 
 test('app boots and exposes the student roster', () => {
   const { SB } = boot();

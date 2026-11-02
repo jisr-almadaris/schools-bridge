@@ -123,6 +123,10 @@
       full_name: owner.name,
       school: owner.school,
       visitor_id: owner.visitor_id || visitor,
+      // Explicit proof: the server never needs to infer a child from a name alone.
+      ...(owner.token && owner.student_id ? {
+        resume_token: owner.token, resume_student_id: owner.student_id,
+      } : {}),
     });
     if (!data.student_id || !data.submission_token) {
       throw Object.assign(new Error('invalid_identity_response'), { code: 'invalid_identity_response' });
@@ -224,7 +228,7 @@
     if (!pass) return options.waitForConfirmation ? Promise.reject(new Error('missing_identity')) : undefined;
     const name = String(pass.name || '').trim();
     const school = String(pass.school || '').trim();
-    if (!name || !school) return options.waitForConfirmation
+    if (name.split(/\s+/).filter(Boolean).length < 3 || !school) return options.waitForConfirmation
       ? Promise.reject(Object.assign(new Error('invalid_identity'), { code: 'invalid_identity' }))
       : undefined;
 
@@ -285,20 +289,22 @@
   }
   function learningTrace(attempt, chunk, items) {
     if (!attempt?.owner || !Number.isInteger(chunk) || !Array.isArray(items) || !items.length) return;
-    if (attempt.activity?.id !== 'game-comparisons') return;
     // Only numerical/boolean answers; never forward a name or a full question.
     const safeItems=items.slice(0,20).map(x=>({question_index:Number(x.question_index),
-      correct:x.correct === true, response_ms:Number(x.response_ms), hint_used:x.hint_used === true}));
+      ...(typeof x.question_id==='string' && /^[A-Za-z0-9._:-]{1,64}$/.test(x.question_id) ? {question_id:x.question_id} : {}),
+      correct:x.correct === true, response_ms:Math.min(120000,Math.max(0,Math.round(Number(x.response_ms)))),
+      hint_used:x.hint_used === true, question_type:['choice','matching','spelling','typing','true_false','ordering'].includes(x.question_type) ? x.question_type : 'choice',
+      points:Number.isInteger(x.points) && x.points>=0 && x.points<=100 ? x.points : (x.correct === true ? 1 : 0)}));
     if (safeItems.some(x=>!Number.isInteger(x.question_index) || !Number.isInteger(x.response_ms))) return;
     enqueue('learning/trace', { event_id:attempt.event_id+'-trace-'+chunk,
-      activity_key:attempt.activity.id,chunk,items:safeItems },attempt.owner);
+      activity_key:attempt.activity.id,attempt_id:attempt.event_id,chunk,items:safeItems },attempt.owner);
   }
   function certificate(award, ownerOverride) {
     const owner = ownerOverride || current;
     if (!owner || !award || !Number.isFinite(award.score)) return;
     const key = slug(award.key), score = Math.round(award.score);
     enqueue('activity/result', {
-      event_id: `cert-${eventScope(owner)}-${key}-${score}`,
+      event_id: `cert-${eventScope(owner)}-${key}-${score}`, 
       activity_key: key + '-cert',
       activity_title: award.title || ('Certificate · ' + key),
       activity_type: 'certificate',
