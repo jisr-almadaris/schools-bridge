@@ -25,6 +25,7 @@
   const ROSTER_KEY = 'bridge_roster';
   const TAB_KEY = 'bridge_identity';
   const QUEUE_KEY = 'bridge_queue';
+  const DURABLE_PREFIX = 'bridge_pending_v1::'; // one immutable key per event; safe across tabs
   const LEGACY_KEY = 'bridge_visitor_id';
   const PATHS = ['student/identify', 'activity/opened', 'activity/result', 'assessment/result', 'learning/trace'];
 
@@ -40,7 +41,8 @@
     typeof entry.school === 'string' && typeof entry.visitor_id === 'string'
   ).map(entry => ({
     key: entry.key, name: entry.name, school: entry.school, visitor_id: entry.visitor_id,
-    student_id: entry.student_id ?? null, token: entry.token ?? null, lastUsed: entry.lastUsed ?? null,
+    student_id: entry.student_id ?? null, token: entry.token ?? null,
+    returnCode: entry.returnCode ?? null, lastUsed: entry.lastUsed ?? null,
   }));
 
   let roster = cleanRoster(read('localStorage', ROSTER_KEY, []));
@@ -52,6 +54,7 @@
         mine.token = entry.token;
         mine.student_id = entry.student_id;
       }
+      if (mine && !mine.returnCode && entry.returnCode) mine.returnCode = entry.returnCode;
     }
     write('localStorage', ROSTER_KEY, roster);
   };
@@ -61,6 +64,30 @@
   if (tab && typeof tab.key === 'string') current = roster.find(entry => entry.key === tab.key) || null;
 
   let queue = read('sessionStorage', QUEUE_KEY, []);
+  // Each pending event is separately mirrored to localStorage. Unlike a single
+  // shared queue, this cannot overwrite another tab's pending pupil results.
+  // Recover events when the Jisr tab was closed or refreshed before Render
+  // accepted them. Network retries use the ORIGINAL event_id.
+  try {
+    const store = window.localStorage;
+    const recovered = [];
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (!key?.startsWith(DURABLE_PREFIX)) continue;
+      const item = JSON.parse(store.getItem(key));
+      if (item && PATHS.includes(item.path) && item.body && item.owner &&
+          typeof item.owner.name === 'string' && typeof item.owner.school === 'string') {
+        item.durableKey = key;
+        recovered.push(item);
+      }
+    }
+    if (!Array.isArray(queue)) queue = [];
+    const known = new Set(queue.map(item => item?.durableKey).filter(Boolean));
+    for (const item of recovered) if (!known.has(item.durableKey)) {
+      queue.push(item);
+      known.add(item.durableKey);
+    }
+  } catch { /* storage blocked: continue using this tab's in-memory queue */ }
   if (!Array.isArray(queue)) queue = [];
   queue = queue.filter(item => item && PATHS.includes(item.path) && item.body && item.owner &&
     typeof item.owner.name === 'string' && typeof item.owner.school === 'string');
@@ -72,10 +99,19 @@
   }
 
   let busy = false, timer;
+  const durableSave = item => {
+    if (!item.durableKey) item.durableKey = DURABLE_PREFIX + uid();
+    try { window.localStorage.setItem(item.durableKey, JSON.stringify({
+      path: item.path, body: item.body, owner: item.owner
+    })); } catch { /* quota/private browsing: session queue still works */ }
+  };
+  const durableRemove = item => {
+    try { if (item.durableKey) window.localStorage.removeItem(item.durableKey); } catch { /* ignore */ }
+  };
   let consecutiveFailures = 0;
   const persist = () => {
     write('sessionStorage', TAB_KEY, current ? { key: current.key } : null);
-    write('sessionStorage', QUEUE_KEY, queue);
+    write('sessionStorage', QUEUE_KEY, queue.map(({_waiter, ...item}) => item));
   };
   const defer = milliseconds => { clearTimeout(timer); timer = setTimeout(flush, milliseconds); };
   const safeCode = value => String(value || 'network_error')
@@ -90,7 +126,7 @@
     if (!waiter) return;
     delete item._waiter;
     if (error) waiter.reject(error);
-    else waiter.resolve({ student_id: item.owner.student_id, visitor_id: item.owner.visitor_id });
+    else waiter.resolve({ student_id: item.owner.student_id, visitor_id: item.owner.visitor_id, returnCode: item.owner.returnCode });
   };
 
   async function call(path, body, token) {
@@ -127,6 +163,7 @@
       ...(owner.token && owner.student_id ? {
         resume_token: owner.token, resume_student_id: owner.student_id,
       } : {}),
+      ...(owner.returnCode ? { student_return_code: owner.returnCode } : {}),
     });
     if (!data.student_id || !data.submission_token) {
       throw Object.assign(new Error('invalid_identity_response'), { code: 'invalid_identity_response' });
@@ -136,10 +173,12 @@
     }
     owner.student_id = data.student_id;
     owner.token = data.submission_token;
+    if (data.student_return_code) owner.returnCode = data.student_return_code;
     const entry = roster.find(candidate => candidate.key === (owner.key || studentKey(owner.name, owner.school)));
     if (entry) {
       entry.student_id = data.student_id;
       entry.token = data.submission_token;
+      entry.returnCode = owner.returnCode;
     }
     saveRoster();
   }
@@ -153,7 +192,7 @@
       item.path === 'activity/result' &&
       item.body?.completion_status === 'completed' &&
       (['vocabulary', 'game', 'reading', 'assessment'].includes(item.body?.activity_type) ||
-       (queue[0].path === 'learning/trace' && item.body?.activity_type === 'certificate')));
+        item.body?.activity_type === 'certificate'));
     if (idx > 0) {
       const [important] = queue.splice(idx, 1);
       queue.unshift(important);
@@ -179,24 +218,26 @@
             }
           }
           queue.shift();
+          durableRemove(item);
           persist();
           settle(item);
           consecutiveFailures = 0;
         } catch (error) {
-          // Diagnostic telemetry must NEVER stall a graded result or a certificate
-          // when a server version without the optional endpoint is deployed.
-          if (item.path === 'learning/trace' && [400,404,405,410,422,501,503].includes(error?.status)) {
-            console.warn('Optional learning fingerprint temporarily unavailable; grade/certificate unaffected.');
-            queue.shift(); persist(); settle(item, null); continue;
-          }
-          const rejected = error?.status === 400;
-          logFailure(rejected ? 'rejected' : 'deferred', item, error);
-          settle(item, error);
+          // No learning evidence is silently discarded. A terminal validation
+          // failure is held in durable storage for diagnostic repair; it cannot
+          // stall graded results still in the active queue.
+          const rejected = [400, 404, 405, 409, 410, 422, 501].includes(error?.status);
+          logFailure(rejected ? 'needs_repair' : 'deferred', item, error);
           if (rejected) {
+            if (item.path === 'student/identify') durableRemove(item);
+            settle(item, error);
             queue.shift();
             persist();
-            continue;
+            continue; // keep durable copy; never invent a successful save
           }
+          // Grade/certificate acknowledgements remain pending until the
+          // backend confirms storage (or an idempotent duplicate response).
+          if (item.path === 'student/identify') settle(item, error);
           // Keep the event for a safe idempotent retry. Respect 429 backoff.
           consecutiveFailures++;
           const backoff = Math.min(60000, 12000 * (2 ** Math.min(3, consecutiveFailures - 1)));
@@ -218,6 +259,7 @@
         Object.defineProperty(item, '_waiter', { value: { resolve, reject }, configurable: true });
       });
     }
+    durableSave(item);
     queue.push(item);
     persist();
     void flush();
@@ -239,24 +281,27 @@
       entry = {
         key, name, school,
         visitor_id: usedVisitors.has(visitor) ? 'v-' + uid() : visitor,
-        student_id: null, token: null, lastUsed: null,
+        student_id: null, token: null, returnCode: null, lastUsed: null,
       };
       roster.push(entry);
     } else {
       entry.name = name;
       entry.school = school;
     }
+    if (options.returnCode) entry.returnCode = String(options.returnCode).replace(/[\s-]/g, '').toUpperCase();
     entry.lastUsed = new Date().toISOString();
     current = entry;
     saveRoster();
     persist();
 
-    if (!entry.token || options.force === true) {
+    // Always confirm with server on explicit gateway submission. A cached
+    // local token is not proof that the server still has this account.
+    if (!entry.token || options.force === true || options.waitForConfirmation === true) {
       return enqueue('student/identify', {}, entry, options.waitForConfirmation === true);
     }
     void flush();
     return options.waitForConfirmation
-      ? Promise.resolve({ student_id: entry.student_id, visitor_id: entry.visitor_id })
+      ? Promise.resolve({ student_id: entry.student_id, visitor_id: entry.visitor_id, returnCode: entry.returnCode })
       : undefined;
   }
 
@@ -265,11 +310,11 @@
     enqueue('activity/opened', { activity_key: activity.id }, attempt.owner);
     return attempt;
   }
-  function result(attempt, score, maxScore) {
+  function result(attempt, score, maxScore, options = {}) {
     if (!attempt || attempt.submitted || !Number.isFinite(score) || !Number.isFinite(maxScore) || maxScore <= 0) return;
     attempt.submitted = true;
-    enqueue('activity/result', {
-      event_id: attempt.event_id,
+    const confirmation = enqueue('activity/result', {
+      event_id: options.eventId || attempt.event_id,
       activity_key: attempt.activity.id,
       activity_title: attempt.activity.title || attempt.activity.name,
       activity_type: attempt.type,
@@ -278,7 +323,7 @@
       percentage: Math.round(score / maxScore * 100),
       completion_status: 'completed',
       completed_at: new Date().toISOString(),
-    }, attempt.owner);
+    }, attempt.owner, options.waitForConfirmation === true);
     const station = { 'st-checkpoint': 'verification', 'st-progress': 'progress', 'st-mastery': 'mastery' }[attempt.activity.id];
     if (attempt.type === 'assessment' && station) {
       enqueue('assessment/result', {
@@ -286,8 +331,9 @@
         completed_at: new Date().toISOString(),
       }, attempt.owner);
     }
+    return confirmation;
   }
-  function learningTrace(attempt, chunk, items) {
+  function learningTrace(attempt, chunk, items, options = {}) {
     if (!attempt?.owner || !Number.isInteger(chunk) || !Array.isArray(items) || !items.length) return;
     // Only numerical/boolean answers; never forward a name or a full question.
     const safeItems=items.slice(0,20).map(x=>({question_index:Number(x.question_index),
@@ -296,21 +342,22 @@
       hint_used:x.hint_used === true, question_type:['choice','matching','spelling','typing','true_false','ordering'].includes(x.question_type) ? x.question_type : 'choice',
       points:Number.isInteger(x.points) && x.points>=0 && x.points<=100 ? x.points : (x.correct === true ? 1 : 0)}));
     if (safeItems.some(x=>!Number.isInteger(x.question_index) || !Number.isInteger(x.response_ms))) return;
-    enqueue('learning/trace', { event_id:attempt.event_id+'-trace-'+chunk,
-      activity_key:attempt.activity.id,attempt_id:attempt.event_id,chunk,items:safeItems },attempt.owner);
+    return enqueue('learning/trace', { event_id:options.eventId || (attempt.event_id+'-trace-'+chunk),
+      activity_key:attempt.activity.id,attempt_id:attempt.event_id,chunk,items:safeItems },attempt.owner,
+      options.waitForConfirmation === true);
   }
-  function certificate(award, ownerOverride) {
+  function certificate(award, ownerOverride, options = {}) {
     const owner = ownerOverride || current;
     if (!owner || !award || !Number.isFinite(award.score)) return;
     const key = slug(award.key), score = Math.round(award.score);
-    enqueue('activity/result', {
-      event_id: `cert-${eventScope(owner)}-${key}-${score}`, 
+    return enqueue('activity/result', {
+      event_id: options.eventId || `cert-${eventScope(owner)}-${key}-${score}`, 
       activity_key: key + '-cert',
       activity_title: award.title || ('Certificate · ' + key),
       activity_type: 'certificate',
       score, max_score: 100, percentage: score,
       completion_status: 'completed', completed_at: new Date().toISOString(),
-    }, owner);
+    }, owner, options.waitForConfirmation === true);
   }
   function achievement(badge) {
     const owner = current;
@@ -328,6 +375,10 @@
   function listStudents() {
     return roster.map(entry => ({ name: entry.name, school: entry.school, lastUsed: entry.lastUsed }));
   }
+  function getReturnCode(pass) {
+    const entry = pass && roster.find(candidate => candidate.key === studentKey(pass.name, pass.school));
+    return entry?.returnCode || '';
+  }
   function isIdentityConfirmed(pass) {
     if (!pass) return false;
     const entry = roster.find(candidate => candidate.key === studentKey(pass.name, pass.school));
@@ -335,8 +386,12 @@
   }
 
   window.BridgeClient = {
-    setIdentity, start, result, learningTrace, certificate, achievement, flush, listStudents, isIdentityConfirmed
+    setIdentity, start, result, learningTrace, certificate, achievement, flush, listStudents, isIdentityConfirmed, getReturnCode
   };
   window.addEventListener('online', flush);
+  window.addEventListener('focus', flush);
+  try { window.document?.addEventListener('visibilitychange', () => {
+    if (!document.hidden) void flush();
+  }); } catch { /* optional */ }
   defer(3000);
 })();

@@ -86,6 +86,13 @@
             <small class="f-error" hidden>فضلًا اختاري مدرستك</small>
           </label>
 
+          <label class="field" for="studentReturnCode">
+            <span class="f-label">رمز العودة (فقط عند الدخول من جهاز جديد)</span>
+            <input id="studentReturnCode" name="studentReturnCode" type="text"
+                   maxlength="20" autocomplete="off" spellcheck="false"
+                   placeholder="رمز العودة إن كان الاسم مسجلًا">
+            <small>إن كان اسمك مسجلًا من جهاز آخر، اكتبي رمز العودة الموجود في بطاقة عبورك.</small>
+          </label>
           <button class="btn btn-send ripple" type="submit">
             <span>إرسال</span>
             <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 24L40 8 28 40l-6.5-11.5Z"/><path d="M21.5 28.5L40 8"/></svg>
@@ -101,7 +108,9 @@
           <dl class="done-rows">
             <div><dt>الطالبة</dt><dd data-pass="name">—</dd></div>
             <div><dt>المدرسة</dt><dd data-pass="school">—</dd></div>
+            <div><dt>رمز العودة من جهاز آخر</dt><dd id="studentReturnCodeView">—</dd></div>
           </dl>
+          <small>احتفظي برمز العودة بشكل خاص ولا تشاركيه مع الآخرين. لا يُستخدم إلا عند تغيير الجهاز.</small>
           <button class="btn btn-ghost ripple" type="button" id="editPass">تعديل البيانات</button>
         </div>
       </div>
@@ -401,7 +410,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <canvas id="confetti" aria-hidden="true"></canvas>
 
-<script src="bridge-client.js"></script>
-<script src="app.js"></script>
+<script src="bridge-client.js?v=identity-reliable-20261103"></script>
+<script src="app.js?v=identity-reliable-20261103"></script>
 </body>
 </html>

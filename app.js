@@ -508,6 +508,35 @@ function trackGameAttempt(activity, kind, urlForOrigin) {
   markGameVisited(activity.id);
   return attempt;
 }
+// A `postMessage` is NOT proof that Render saved the score. Newer game
+// senders include a one-time delivery id and wait for this acknowledgement.
+// We only acknowledge AFTER the public API returns 2xx/ok, not on enqueue.
+function acknowledgeSavedGameReport(data, attempt, origin, route, replyTarget, confirmed) {
+  const deliveryId = String(data?.delivery_id || '');
+  if (!/^[A-Za-z0-9._:-]{8,120}$/.test(deliveryId) || !confirmed ||
+      typeof confirmed.then !== 'function') return;
+  if (!attempt.pendingAckIds) attempt.pendingAckIds = new Set();
+  // A sender retries every few seconds; do not attach unbounded listeners to
+  // the same pending network request while Render is asleep or offline.
+  if (attempt.pendingAckIds.has(deliveryId)) return;
+  attempt.pendingAckIds.add(deliveryId);
+  confirmed.then(() => {
+    attempt.pendingAckIds.delete(deliveryId);
+    const message = {
+      source: 'schools-bridge-host', type: 'saved', activityId: attempt.activity.id,
+      delivery_id: deliveryId,
+      ...(attempt.sessionId ? {sessionId: attempt.sessionId} : {})
+    };
+    try {
+      if (route === 'channel') replyTarget.postMessage(message);
+      else replyTarget?.postMessage(message, origin);
+    } catch (error) { console.warn('Game save acknowledgement unavailable', attempt.activity.id); }
+  }).catch(() => {
+    attempt.pendingAckIds.delete(deliveryId);
+    // The sender will retry the SAME delivery id; no fabricated success reply.
+    console.warn('Game save not yet confirmed', attempt.activity.id);
+  });
+}
 function handleGameReport(data, attempt, origin, route, replyTarget) {
   if (!data || typeof data !== 'object' || data.source !== 'schools-bridge-game') return;
   if (!attempt?.owner || String(data.activityId || '') !== attempt.activity.id) return;
@@ -516,6 +545,23 @@ function handleGameReport(data, attempt, origin, route, replyTarget) {
   // or unguessable BroadcastChannel session.
   if (route === 'opener' && attempt.gameWindow && replyTarget !== attempt.gameWindow) return;
   if (route === 'channel' && data.sessionId !== attempt.sessionId) return;
+  // Replays from older rounds are already bound to a stable sender event id.
+  // A late retry must not become a new result after the pupil clicks replay.
+  const deliveryId = String(data.delivery_id || '');
+  if (/^[A-Za-z0-9._:-]{8,120}$/.test(deliveryId) &&
+      attempt.confirmedDeliveries?.has(deliveryId)) {
+    acknowledgeSavedGameReport(data, attempt, origin, route, replyTarget,
+      attempt.confirmedDeliveries.get(deliveryId));
+    return;
+  }
+  const rememberDelivery = promise => {
+    if (promise && typeof promise.then === 'function' &&
+        /^[A-Za-z0-9._:-]{8,120}$/.test(deliveryId)) {
+      if (!attempt.confirmedDeliveries) attempt.confirmedDeliveries = new Map();
+      attempt.confirmedDeliveries.set(deliveryId, promise);
+    }
+    return promise;
+  };
   if (data.type === 'ready') {
     const message = {
       source: 'schools-bridge-host', type: 'identity', activityId: attempt.activity.id,
@@ -539,6 +585,10 @@ function handleGameReport(data, attempt, origin, route, replyTarget) {
     attempt.gameCompletionReceived = false;
     attempt.gameCertificateReceived = false;
     attempt.tracedChunks = new Set();
+    attempt.traceConfirmations = new Map();
+    // Preserve delivery receipts across voluntary game replays.
+    attempt.completionConfirmation = null;
+    attempt.certificateConfirmation = null;
     return;
   }
   if (data.type === 'learning-trace') {
@@ -559,19 +609,34 @@ function handleGameReport(data, attempt, origin, route, replyTarget) {
           typeof x.correct!=='boolean' || typeof x.hint_used!=='boolean' ||
           !Number.isInteger(x.response_ms) || x.response_ms<0 || x.response_ms>120000)) return;
     if (!attempt.tracedChunks) attempt.tracedChunks = new Set();
-    if (attempt.tracedChunks.has(chunk)) return;
+    if (!attempt.traceConfirmations) attempt.traceConfirmations = new Map();
+    if (attempt.tracedChunks.has(chunk)) {
+      acknowledgeSavedGameReport(data, attempt, origin, route, replyTarget,
+        attempt.traceConfirmations.get(chunk));
+      return;
+    }
     attempt.tracedChunks.add(chunk);
-    window.BridgeClient?.learningTrace(attempt,chunk,items);
+    const confirmed = rememberDelivery(window.BridgeClient?.learningTrace(attempt, chunk, items,
+      { waitForConfirmation: true, eventId: deliveryId || undefined }));
+    attempt.traceConfirmations.set(chunk, confirmed);
+    acknowledgeSavedGameReport(data, attempt, origin, route, replyTarget, confirmed);
     return;
   }
   if (data.type === 'completed') {
-    if (attempt.gameCompletionReceived) return;
+    if (attempt.gameCompletionReceived) {
+      acknowledgeSavedGameReport(data, attempt, origin, route, replyTarget,
+        attempt.completionConfirmation);
+      return;
+    }
     const score = Number(data.score), maxScore = Number(data.maxScore);
     if (!Number.isFinite(score) || !Number.isFinite(maxScore) || maxScore <= 0 || score < 0 || score > maxScore) {
       console.warn('Bridge game message rejected: invalid_score', attempt.activity.id); return;
     }
     attempt.gameCompletionReceived = true;
-    window.BridgeClient?.result(attempt, score, maxScore);
+    attempt.completionConfirmation = rememberDelivery(window.BridgeClient?.result(attempt, score, maxScore,
+      { waitForConfirmation: true, eventId: deliveryId || undefined }));
+    acknowledgeSavedGameReport(data, attempt, origin, route, replyTarget,
+      attempt.completionConfirmation);
     const pct = Math.round(score / maxScore * 100);
     const stars = pct >= 80 ? 3 : (pct >= 60 ? 2 : (score > 0 ? 1 : 0));
     // Save this completion under the student who opened the game, NEVER
@@ -607,20 +672,31 @@ function handleGameReport(data, attempt, origin, route, replyTarget) {
       } catch (error) { console.warn('Could not persist previous pupil local progress', error); }
     }
   } else if (data.type === 'certificate') {
-    if (attempt.gameCertificateReceived) return;
+    if (attempt.gameCertificateReceived) {
+      acknowledgeSavedGameReport(data, attempt, origin, route, replyTarget,
+        attempt.certificateConfirmation);
+      return;
+    }
     const score = Number(data.score);
     if (!Number.isFinite(score) || score < 0 || score > 100) {
       console.warn('Bridge game message rejected: invalid_certificate_score', attempt.activity.id); return;
     }
     attempt.gameCertificateReceived = true;
-    window.BridgeClient?.certificate({
+    attempt.certificateConfirmation = rememberDelivery(window.BridgeClient?.certificate({
       key: attempt.activity.id, title: data.title || attempt.activity.title, score,
-    }, attempt.owner);
+    }, attempt.owner, { waitForConfirmation: true, eventId: deliveryId || undefined }));
+    acknowledgeSavedGameReport(data, attempt, origin, route, replyTarget,
+      attempt.certificateConfirmation);
   } else {
     console.warn('Bridge game message ignored: unknown_type', String(data.type || ''));
   }
 }
 function launchGameTab(activity, kind, href) {
+  if (!SB.pass || !window.BridgeClient?.isIdentityConfirmed(SB.pass)) {
+    toast('اكتبي اسمك الثلاثي واختاري مدرستك أولًا، ثم انتظري تأكيد التسجيل.');
+    document.getElementById('passForm')?.scrollIntoView({behavior:'smooth'});
+    return;
+  }
   const target = href || activity.url;
   const attempt = trackGameAttempt(activity, kind, target);
   if (!target) return;
@@ -992,6 +1068,8 @@ function applyPassUI({ celebrate = false } = {}) {
   if (has) {
     $('[data-pass="name"]').textContent  = SB.pass.name;
     $('[data-pass="school"]').textContent = SB.pass.school;
+    const codeView = $('#studentReturnCodeView');
+    if (codeView) codeView.textContent = window.BridgeClient?.getReturnCode(SB.pass) || '—';
   }
 
   /* launch status */
@@ -1023,7 +1101,7 @@ function applyPassUI({ celebrate = false } = {}) {
 
 function initPassForm() {
   const form = $('#passForm');
-  const nameI = $('#studentName'), schoolI = $('#schoolName');
+  const nameI = $('#studentName'), schoolI = $('#schoolName'), returnI = $('#studentReturnCode');
   const send = $('button[type="submit"]', form), submitStatus = $('#passSubmitStatus');
   // Warm the public API while the student is typing; no name/school is sent.
   // This can shorten first-time registration after a sleeping Render instance.
@@ -1060,7 +1138,7 @@ function initPassForm() {
     // Exact configured participating-school names, as displayed in the teacher dashboard.
     // Both the selected label and stored school value match the configured names.
     const schoolSelected = ['الابتدائية التاسعة والعشرون', 'ابتدائية عائشة ام المؤمنين'].includes(school);
-    [[nameI, name, fullName.length >= 2], [schoolI, school, schoolSelected]].forEach(([input, val, valid]) => {
+    [[nameI, name, fullName.length >= 3], [schoolI, school, schoolSelected]].forEach(([input, val, valid]) => {
       const field = input.closest('.field');
       const err = field.querySelector('.f-error');
       field.classList.remove('is-error'); err.hidden = true;
@@ -1084,7 +1162,7 @@ function initPassForm() {
     try {
       // Reuse a previously confirmed student token for instant return visits.
       // New students still wait for the server's confirmation (never fake success).
-      await window.BridgeClient.setIdentity({ name, school }, { waitForConfirmation: true });
+      await window.BridgeClient.setIdentity({ name, school }, { waitForConfirmation: true, returnCode: returnI?.value?.trim() || '' });
       // Registers/switches local state only after the backend accepted identity.
       // A different name + school is an independent append-only student slot.
       const switched = SB.registerStudent({ name, school });
@@ -1095,7 +1173,9 @@ function initPassForm() {
       // BridgeClient emits a PII-free endpoint/status/code diagnostic. Keep the
       // student-facing message generic and leave the form available for retry.
       console.warn('Bridge registration was not confirmed:', error?.code || error?.message || 'network_error');
-      setSubmitState('error', 'تعذّر حفظ بطاقة العبور الآن. تحقّقي من الاتصال ثم حاولي مرة أخرى.');
+      setSubmitState('error', error?.code === 'student_name_already_registered'
+        ? 'الاسم مسجل سابقًا. أدخلي رمز العودة من جهازك السابق أو تواصلي مع المعلمة.'
+        : 'تعذّر حفظ بطاقة العبور الآن. تحقّقي من الاتصال ثم حاولي مرة أخرى.');
       toast('لم يتم تأكيد التسجيل بعد — حاولي مرة أخرى');
     } finally {
       if (!SB.pass || SB.pass.name !== name || SB.pass.school !== school) setSubmitState('idle', submitStatus?.textContent || '');
@@ -1723,6 +1803,11 @@ const bridgeAnswerClock = (() => {
 let bridgeReadingTrace = [];
 let bridgeAssessmentTrace = [];
 function renderQuiz() {
+  if (!SB.pass || !window.BridgeClient?.isIdentityConfirmed(SB.pass)) {
+    toast('اكتبي اسمك الثلاثي واختاري مدرستك وأكدي التسجيل قبل بدء اختبار القراءة.');
+    document.getElementById('passForm')?.scrollIntoView({ behavior:'smooth', block:'center' });
+    return;
+  }
   if (bridgeReadingAttempt?.submitted) bridgeReadingAttempt = window.BridgeClient?.start(_rBook, 'reading');
   brSetMode('quiz');
   _rRight = 0; _rQ = 0; bridgeReadingTrace = [];
@@ -2027,6 +2112,11 @@ function ensureStation() {
 }
 
 function openStation(id) {
+  if (!SB.pass || !window.BridgeClient?.isIdentityConfirmed(SB.pass)) {
+    toast('سجلي اسمك الثلاثي ومدرستك أولًا حتى تُحفظ نتيجة المحطة.');
+    document.getElementById('passForm')?.scrollIntoView({ behavior:'smooth', block:'center' });
+    return;
+  }
   const st = SB.stations.find(x => x.id === id); if (!st) return;
   bridgeAssessmentAttempt = window.BridgeClient?.start(st, 'assessment');
   const el = ensureStation();
