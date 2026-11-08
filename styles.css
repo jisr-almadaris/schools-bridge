@@ -1538,3 +1538,16 @@ html.no-scroll, html.no-scroll body{overflow:hidden;overscroll-behavior:none}
   .jrp-date{display:none}
   .jrp-cta{margin-inline-end:14px}
 }
+
+/* Return code is deliberately invisible for first-time pupils.
+   It appears only after the server reports an existing student account. */
+.pass-form .return-recovery[hidden]{display:none !important}
+.pass-form .return-recovery{
+  background:rgba(246,243,252,.75);border:1px solid #ECE8F6;
+  border-radius:18px;padding:12px 14px;color:#62547D;
+}
+.pass-form .return-recovery > small{
+  display:block;font-size:.75rem;line-height:1.65;margin:7px 5px 0;
+}
+/* Browser [hidden] must win over the legacy .f-error display rule. */
+.pass-form .f-error[hidden],.pass-form .pass-submit-status[hidden]{display:none !important}
