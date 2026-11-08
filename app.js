@@ -1102,6 +1102,7 @@ function applyPassUI({ celebrate = false } = {}) {
 function initPassForm() {
   const form = $('#passForm');
   const nameI = $('#studentName'), schoolI = $('#schoolName'), returnI = $('#studentReturnCode');
+  const returnRecovery = $('#returnRecovery');
   const send = $('button[type="submit"]', form), submitStatus = $('#passSubmitStatus');
   // Warm the public API while the student is typing; no name/school is sent.
   // This can shorten first-time registration after a sleeping Render instance.
@@ -1167,14 +1168,22 @@ function initPassForm() {
       // A different name + school is an independent append-only student slot.
       const switched = SB.registerStudent({ name, school });
       if (switched) SB.renderAll();
+      // Never leave a recovery code visible in the form on a shared device.
+      if (returnI) returnI.value = '';
+      if (returnRecovery) returnRecovery.hidden = true;
       setSubmitState('success');
       applyPassUI({ celebrate: true });
     } catch (error) {
       // BridgeClient emits a PII-free endpoint/status/code diagnostic. Keep the
       // student-facing message generic and leave the form available for retry.
       console.warn('Bridge registration was not confirmed:', error?.code || error?.message || 'network_error');
-      setSubmitState('error', error?.code === 'student_name_already_registered'
-        ? 'الاسم مسجل سابقًا. أدخلي رمز العودة من جهازك السابق أو تواصلي مع المعلمة.'
+      const existingAccount = error?.code === 'student_name_already_registered' || error?.status === 409;
+      if (existingAccount && returnRecovery) {
+        returnRecovery.hidden = false;
+        if (returnI) returnI.focus();
+      }
+      setSubmitState('error', existingAccount
+        ? 'الاسم مسجل سابقًا. إذا كان حسابكِ، أدخلي رمز العودة من جهازك السابق أو اطلبيه من المعلمة.'
         : 'تعذّر حفظ بطاقة العبور الآن. تحقّقي من الاتصال ثم حاولي مرة أخرى.');
       toast('لم يتم تأكيد التسجيل بعد — حاولي مرة أخرى');
     } finally {
@@ -1190,6 +1199,8 @@ function initPassForm() {
   $('#editPass').addEventListener('click', () => {
     nameI.value = SB.pass?.name || '';
     schoolI.value = SB.pass?.school || '';
+    if (returnI) returnI.value = '';
+    if (returnRecovery) returnRecovery.hidden = true;
     if (submitStatus) { submitStatus.hidden = true; submitStatus.textContent = ''; }
     $('#passDone').hidden = true;
     $('#passForm').hidden = false;
