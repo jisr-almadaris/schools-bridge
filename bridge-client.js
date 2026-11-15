@@ -168,7 +168,8 @@
     if (!data.student_id || !data.submission_token) {
       throw Object.assign(new Error('invalid_identity_response'), { code: 'invalid_identity_response' });
     }
-    if (owner.student_id && owner.student_id !== data.student_id) {
+    if (owner.student_id && Number(owner.student_id) !== Number(data.student_id) &&
+        Number(data.merged_from_student_id) !== Number(owner.student_id)) {
       throw Object.assign(new Error('identity_changed'), { status: 400, code: 'identity_changed' });
     }
     owner.student_id = data.student_id;
@@ -372,6 +373,32 @@
       completion_status: 'completed', completed_at: new Date().toISOString(),
     }, owner);
   }
+  // Read-only recovery, scoped to this pupil's token, never by public name.
+  async function getProgress(pass) {
+    const entry = pass && roster.find(candidate => candidate.key === studentKey(pass.name, pass.school));
+    if (!entry?.token || !entry?.student_id) return null;
+    async function request() {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 90000);
+      try {
+        const response = await fetch(API + 'student/progress', {
+          method: 'GET', credentials: 'omit', cache: 'no-store', signal: controller.signal,
+          headers: { Authorization: 'Bearer ' + entry.token }
+        });
+        if (!response.ok) throw Object.assign(new Error('progress_unavailable'), { status: response.status });
+        const data = await response.json();
+        if (data?.ok !== true || !Array.isArray(data.activities)) throw new Error('invalid_progress_response');
+        return data;
+      } finally { clearTimeout(timeout); }
+    }
+    try { return await request(); }
+    catch (error) {
+      if (![401, 403].includes(error?.status)) throw error;
+      await identify(entry); // Handles an old token transferred by a confirmed merge.
+      return request();
+    }
+  }
+
   function listStudents() {
     return roster.map(entry => ({ name: entry.name, school: entry.school, lastUsed: entry.lastUsed }));
   }
@@ -386,7 +413,7 @@
   }
 
   window.BridgeClient = {
-    setIdentity, start, result, learningTrace, certificate, achievement, flush, listStudents, isIdentityConfirmed, getReturnCode
+    setIdentity, start, result, learningTrace, certificate, achievement, flush, listStudents, isIdentityConfirmed, getReturnCode, getProgress
   };
   window.addEventListener('online', flush);
   window.addEventListener('focus', flush);
