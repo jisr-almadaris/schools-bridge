@@ -431,6 +431,70 @@ SB.grantStars = function (id, n) {           // hook for the official games when
   SB.saveProgress();
 };
 
+/* Restore VERIFIED completed activities after a merge/revisit. The backend is
+   authoritative for submitted results; local unsent progress is preserved by
+   taking unions/maxima, never clearing the child's browser-only history. */
+SB.restoreRecordedProgress = async function (pass) {
+  const expectedKey = pass ? sbStudentKey(pass.name, pass.school) : null;
+  if (!expectedKey || expectedKey !== SB.currentKey || !window.BridgeClient?.getProgress) return false;
+  let data;
+  try { data = await window.BridgeClient.getProgress(pass); }
+  catch (e) { console.warn('Progress recovery deferred', e?.status || e?.message); return false; }
+  // Another pupil may have opened the gateway while the request was in flight.
+  if (!data || expectedKey !== SB.currentKey || !SB.pass ||
+      sbStudentKey(SB.pass.name, SB.pass.school) !== expectedKey) return false;
+  const games = new Set([...SB.data.games, ...SB.data.vocabulary].map(g => g.id));
+  const books = new Set(SB.data.books.map(b => b.id));
+  const stations = new Set(SB.stations.map(st => st.id));
+  SB.progress.gameStars ||= {};
+  SB.progress.completedGames ||= [];
+  SB.progress.done ||= [];
+  SB.progress.scores ||= {};
+  const completed = new Set(SB.progress.completedGames);
+  const readingDone = new Set(SB.progress.done);
+  let changed = false;
+  const applyScore = (id, percentage, type, finished) => {
+    if (!games.has(id) && !books.has(id) && !stations.has(id)) return;
+    const p = Number(percentage);
+    if (percentage !== null && percentage !== undefined && Number.isFinite(p) && p >= 0 && p <= 100) {
+      const stars = p >= 80 ? 3 : p >= 60 ? 2 : p > 0 ? 1 : 0;
+      if ((SB.progress.gameStars[id] || 0) < stars) { SB.progress.gameStars[id] = stars; changed = true; }
+      if (stations.has(id) && (SB.progress.scores[id] || 0) < p) {
+        SB.progress.scores[id] = p; changed = true;
+      }
+      if (books.has(id) && p >= 80 && !readingDone.has('book-' + id)) {
+        readingDone.add('book-' + id); changed = true;
+      }
+    }
+    if (games.has(id) && finished && !completed.has(id)) { completed.add(id); changed = true; }
+  };
+  for (const row of data.activities || []) {
+    if (!row || typeof row.activity_key !== 'string') continue;
+    applyScore(row.activity_key, row.best_percentage, row.activity_type, row.completed === true);
+  }
+  for (const cert of data.certificates || []) {
+    if (!cert || !cert.earned || typeof cert.activity_key !== 'string') continue;
+    const key = cert.activity_key;
+    // Reading certificates use book- + reading's original book-... id.
+    const id = key.startsWith('book-book-') ? key.slice('book-'.length) : key;
+    applyScore(id, cert.percentage, 'certificate', true);
+    const pct = Number(cert.percentage);
+    if (!Number.isFinite(pct) || pct < 80 || pct > 100) continue;
+    if (SB.cert.awards.every(a => a.key !== key)) {
+      const found = SB.data.books.find(b => b.id === id) ||
+        [...SB.data.games, ...SB.data.vocabulary].find(g => g.id === id) ||
+        SB.stations.find(st => st.id === id);
+      SB.cert.awards.push({ key, title: found?.title || found?.name || key,
+        en: 'Completed activity', score: pct });
+      changed = true;
+    }
+  }
+  if (completed.size !== SB.progress.completedGames.length) SB.progress.completedGames = [...completed];
+  if (readingDone.size !== SB.progress.done.length) SB.progress.done = [...readingDone];
+  if (changed) { SB.saveProgress(); SB.saveCert(); SB.renderAll(); }
+  return changed;
+};
+
 /* ============================================================
    Shared cross-origin GAME REPORTING BRIDGE
    ------------------------------------------------------------
@@ -1173,6 +1237,8 @@ function initPassForm() {
       if (returnRecovery) returnRecovery.hidden = true;
       setSubmitState('success');
       applyPassUI({ celebrate: true });
+      // Recovery is best effort; login must stay usable if Render is offline.
+      void SB.restoreRecordedProgress({ name, school });
     } catch (error) {
       // BridgeClient emits a PII-free endpoint/status/code diagnostic. Keep the
       // student-facing message generic and leave the form available for retry.
@@ -1502,8 +1568,11 @@ if (unconfirmedPass) {
   SB.savePass(null);
   SB.currentKey = null;
   SB.loadStudentState(null);
-} else {
-  window.BridgeClient?.setIdentity(SB.pass);
+} else if (SB.pass && window.BridgeClient?.setIdentity) {
+  const returningPass = { ...SB.pass };
+  void Promise.resolve(window.BridgeClient.setIdentity(returningPass, { waitForConfirmation: true }))
+    .then(() => SB.restoreRecordedProgress(returningPass))
+    .catch(e => console.warn('Returning pupil identity check deferred', e?.status || e?.message));
 }
 SB.renderAll = function () {
   RENDER.games(); RENDER.vocabulary(); RENDER.books(); RENDER.worksheets();
